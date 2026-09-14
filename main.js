@@ -419,7 +419,7 @@ handle('skill:copy', ({ srcPath, type, destDir, folderName, onConflict, agentId,
     }
     let target = expand(srcPath);
     try { target = fs.realpathSync(target); } catch (_) { /* 源不存在时按原路径创建，生成 dangling 供用户发现 */ }
-    fs.symlinkSync(target, dest, 'junction');
+    fs.symlinkSync(target, dest, LINK_TYPE);
     return { ok: true, dest, linked: true };
   }
   if (type === 'folder') {
@@ -507,15 +507,7 @@ handle('import:inspect', async ({ source }) => {
     fs.rmSync(tmpRoot, { recursive: true, force: true });
     fs.mkdirSync(tmpRoot, { recursive: true });
     const ps = (s) => s.replace(/'/g, "''");
-    await new Promise((resolve, reject) => {
-      execFile(
-        'powershell.exe',
-        ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command',
-          `Expand-Archive -LiteralPath '${ps(source)}' -DestinationPath '${ps(tmpRoot)}' -Force`],
-        { timeout: 120000, windowsHide: true },
-        (err) => (err ? reject(err) : resolve())
-      );
-    });
+    await unpackZip(source, tmpRoot);
     src = findSkillRoot(tmpRoot);
   } else {
     src = findSkillRoot(expand(source));
@@ -550,6 +542,29 @@ handle('log:append', ({ type, msg }) => {
     return { ok: false, error: String((err && err.message) || err) };
   }
 });
+
+// Platform differences: Windows=junction+PowerShell zip; macOS/Linux=symlink+zip/unzip
+const IS_WIN = process.platform === 'win32';
+const LINK_TYPE = IS_WIN ? 'junction' : 'dir';
+
+async function packZip(tmpRoot, zipPath) {
+  if (IS_WIN) {
+    await runPowerShell(`Compress-Archive -Path '${ps(tmpRoot)}\\*' -DestinationPath '${ps(zipPath)}' -Force`);
+    return;
+  }
+  await new Promise((resolve, reject) => {
+    execFile('zip', ['-r', '-q', zipPath, '.'], { cwd: tmpRoot, windowsHide: true }, (e) => (e ? reject(e) : resolve()));
+  });
+}
+async function unpackZip(zipPath, destDir) {
+  fs.mkdirSync(destDir, { recursive: true });
+  if (IS_WIN) {
+    return runPowerShell(`Expand-Archive -LiteralPath '${ps(zipPath)}' -DestinationPath '${ps(destDir)}' -Force`);
+  }
+  await new Promise((resolve, reject) => {
+    execFile('unzip', ['-o', zipPath, '-d', destDir], { windowsHide: true }, (e) => (e ? reject(e) : resolve()));
+  });
+}
 
 // --------------------------- WebDAV 云同步 ----------------------------------
 // 参考 clash / cc-switch 的模式：用户自填 WebDAV 配置，支持连接测试、
@@ -814,7 +829,7 @@ handle('sync:restore', async () => {
   fs.mkdirSync(tmpRoot, { recursive: true });
   const dl = await davRequest(cfg, 'GET', davUrl(cfg, name));
   fs.writeFileSync(tmpRoot + '.zip', Buffer.from(await dl.arrayBuffer()));
-  await runPowerShell(`Expand-Archive -LiteralPath '${ps(tmpRoot + '.zip')}' -DestinationPath '${ps(tmpRoot)}' -Force`);
+  await unpackZip(tmpRoot + ".zip", tmpRoot);
 
   const manifest = JSON.parse(fs.readFileSync(path.join(tmpRoot, 'manifest.json'), 'utf8'));
   if (!['CC Skill', 'SkillHarbor'].includes(manifest.app)) {
@@ -949,6 +964,7 @@ function createWindow() {
     backgroundColor: '#f5f5f7',
     icon: path.join(__dirname, 'assets', 'icon.ico'),
     titleBarStyle: 'hidden',
+    trafficLightPosition: { x: 14, y: 22 },
     autoHideMenuBar: true,
     title: 'CC Skill',
     webPreferences: {
