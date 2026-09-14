@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:;" />
+  <title>CC Skill</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- 顶栏 -->
+  <header id="topbar">
+    <div class="logo">
+      <span class="logo-mark"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="26" height="26"><rect width="512" height="512" rx="112" fill="#F0EEE6"/><path d="M383.2 283 A130 130 0 1 1 383.2 229" fill="none" stroke="#262624" stroke-width="22" stroke-linecap="round"/><g transform="translate(383.2 229) rotate(78)"><path d="M46 0 L0 -33 L0 33 Z" fill="#262624"/></g><path d="M208 180 H234 A22 22 0 0 1 278 180 H304 A28 28 0 0 1 332 208 V304 A28 28 0 0 1 304 332 H208 A28 28 0 0 1 180 304 V278 A22 22 0 0 0 180 234 V208 A28 28 0 0 1 208 180 Z" fill="#D97757"/></svg></span>
+      <span class="logo-name">CC Skill</span>
+    </div>
+    <label class="search">
+      <svg class="i" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input id="search" type="search" placeholder="搜索 SKILL 名称 / 描述…  (Ctrl+F)" />
+    </label>
+    <div class="top-actions">
+      <button id="btn-rescan" class="btn" title="重新扫描所有 SKILL 目录">
+        <svg class="i" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>
+        扫描
+      </button>
+      <button id="btn-dups" class="btn tinted" title="把同一 SKILL 的多份实体副本合并为：1 份唯一副本 + N 个链接">
+        <svg class="i" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+        <span id="dups-label">合并重复</span>
+      </button>
+      <button id="btn-import" class="btn">
+        <svg class="i" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
+        导入 SKILL
+      </button>
+      <button id="btn-new" class="btn primary">
+        <svg class="i" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+        新建 SKILL
+      </button>
+    </div>
+    <div class="win-controls">
+      <button class="wc-btn" id="wc-min" title="最小化"><svg class="i" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M5 12h14"/></svg></button>
+      <button class="wc-btn" id="wc-max" title="最大化 / 还原"><svg class="i" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="5.5" y="5.5" width="13" height="13" rx="1.5"/></svg></button>
+      <button class="wc-btn wc-close" id="wc-close" title="关闭"><svg class="i" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+    </div>
+  </header>
+
+  <div class="layout">
+    <!-- 侧栏 -->
+    <aside id="sidebar">
+      <div class="nav-item active" data-filter="dashboard">
+        <span class="nav-icon"><svg class="i" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg></span>
+        <span class="nav-name">总览</span>
+      </div>
+      <div class="nav-section">全局 SKILL</div>
+      <div id="agent-nav"></div>
+      <div class="nav-section" id="project-section" style="display:none">项目 SKILL</div>
+      <div id="project-nav"></div>
+      <div class="sidebar-tools">
+        <div class="nav-item tool-row" id="btn-logs" title="操作日志">
+          <span class="nav-icon"><svg class="i" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg></span>
+          <span class="nav-name">操作日志</span>
+          <span id="log-badge" class="log-badge hidden"></span>
+        </div>
+        <div class="nav-item tool-row" id="btn-settings" title="设置">
+          <span class="nav-icon"><svg class="i" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="22" y2="16"/></svg></span>
+          <span class="nav-name">设置</span>
+        </div>
+      </div>
+      <div class="sidebar-foot" id="sidebar-foot"></div>
+    </aside>
+
+    <!-- 主区 -->
+    <main id="main">
+      <div class="main-head">
+        <h2 id="main-title">总览</h2>
+        <span id="main-hint" class="hint"></span>
+      </div>
+      <div id="grid"></div>
+    </main>
+  </div>
+
+  <!-- 技能详情弹窗 -->
+  <div class="modal-overlay hidden" id="modal-detail">
+    <div class="modal modal-wide">
+      <div class="modal-head">
+        <div>
+          <div class="modal-title" id="detail-title">技能</div>
+          <div class="detail-meta" id="detail-meta"></div>
+        </div>
+        <button class="modal-close" data-close="modal-detail">×</button>
+      </div>
+      <div id="detail-hint" class="hidden"></div>
+      <div class="tabs">
+        <button class="tab active" data-tab="preview">预览</button>
+        <button class="tab" data-tab="edit">编辑源码</button>
+        <button class="tab" data-tab="files">文件</button>
+        <button class="tab" data-tab="links">链接</button>
+      </div>
+      <div class="modal-body">
+        <div class="tab-panel" id="panel-preview"><div class="md" id="detail-md"></div></div>
+        <div class="tab-panel hidden" id="panel-edit">
+          <textarea id="detail-editor" spellcheck="false"></textarea>
+          <div class="edit-actions"><button class="btn primary" id="btn-save-skill">保存修改</button></div>
+        </div>
+        <div class="tab-panel hidden" id="panel-files"><ul class="file-list" id="detail-files"></ul></div>
+        <div class="tab-panel hidden" id="panel-links">
+          <div id="detail-links"></div>
+          <div class="edit-actions">
+            <button class="btn primary" id="btn-add-link">＋ 安装链接到其他 Agent</button>
+          </div>
+        </div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn" id="btn-detail-open">打开所在文件夹</button>
+        <div class="foot-right">
+          <button class="btn danger" id="btn-detail-delete">删除</button>
+          <button class="btn primary" id="btn-detail-copy">复制到其他 Agent…</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 复制到 Agent 弹窗 -->
+  <div class="modal-overlay hidden" id="modal-copy">
+    <div class="modal">
+      <div class="modal-head">
+        <div class="modal-title">安装 SKILL 到其他 Agent</div>
+        <button class="modal-close" data-close="modal-copy">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-row" id="copy-src"></div>
+        <label class="form-label">目标目录（全局 Agent 目录或项目目录）</label>
+        <select id="copy-dir" class="input"></select>
+        <label class="form-label">安装方式</label>
+        <div class="radio-row">
+          <label><input type="radio" name="copy-mode" value="copy" id="copy-mode-copy" checked /> 复制副本</label>
+          <label id="copy-link-label"><input type="radio" name="copy-mode" value="link" id="copy-mode-link" /> 创建链接（单一副本）</label>
+        </div>
+        <p class="hint" style="margin-top:6px">链接 = 在目标目录创建指向唯一副本的目录联接（junction），不复制文件，源更新所有 Agent 即时生效。要求同一磁盘（NTFS）。</p>
+        <label class="form-label">目标已存在同名 SKILL 时</label>
+        <div class="radio-row">
+          <label><input type="radio" name="copy-conflict" value="rename" checked /> 自动重命名（如 xxx-2）</label>
+          <label><input type="radio" name="copy-conflict" value="overwrite" /> 覆盖</label>
+        </div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn" data-close="modal-copy">取消</button>
+        <button class="btn primary" id="btn-copy-go">开始复制</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 新建技能弹窗 -->
+  <div class="modal-overlay hidden" id="modal-new">
+    <div class="modal">
+      <div class="modal-head">
+        <div class="modal-title">新建 SKILL</div>
+        <button class="modal-close" data-close="modal-new">×</button>
+      </div>
+      <div class="modal-body">
+        <label class="form-label">SKILL 名称（英文短横线，如 my-skill）</label>
+        <input id="new-name" class="input" placeholder="my-skill" />
+        <label class="form-label">描述（写清楚触发时机和用途，Agent 靠它决定何时使用）</label>
+        <textarea id="new-desc" class="input" rows="3" placeholder="什么时候用这个 SKILL…"></textarea>
+        <label class="form-label">创建位置（全局 Agent 目录或项目目录）</label>
+        <select id="new-dir" class="input"></select>
+      </div>
+      <div class="modal-foot">
+        <button class="btn" data-close="modal-new">取消</button>
+        <button class="btn primary" id="btn-new-go">创建</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 导入技能弹窗 -->
+  <div class="modal-overlay hidden" id="modal-import">
+    <div class="modal">
+      <div class="modal-head">
+        <div class="modal-title">导入 SKILL</div>
+        <button class="modal-close" data-close="modal-import">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="import-pick">
+          <button class="btn" id="btn-pick-folder">选择 SKILL 文件夹</button>
+          <button class="btn" id="btn-pick-zip">选择 ZIP 压缩包</button>
+        </div>
+        <div id="import-preview" class="import-preview hidden"></div>
+        <div id="import-form" class="hidden">
+          <label class="form-label">安装位置（全局 Agent 目录或项目目录）</label>
+          <select id="import-target" class="input"></select>
+          <label class="form-label">目标已存在同名 SKILL 时</label>
+          <div class="radio-row">
+            <label><input type="radio" name="import-conflict" value="rename" checked /> 自动重命名（如 xxx-2）</label>
+            <label><input type="radio" name="import-conflict" value="overwrite" /> 覆盖</label>
+          </div>
+        </div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn" data-close="modal-import">取消</button>
+        <button class="btn primary" id="btn-import-go" disabled>安装</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 设置弹窗 -->
+  <div class="modal-overlay hidden" id="modal-settings">
+    <div class="modal modal-wide">
+      <div class="modal-head">
+        <div class="modal-title">设置 · Agents 与 SKILL 目录</div>
+        <button class="modal-close" data-close="modal-settings">×</button>
+      </div>
+      <div class="modal-body">
+        <p class="hint">每个 Agent 可关联多个 SKILL 目录；同一目录关联多个 Agent 时即为共享 SKILL 库。改动后点击「保存设置」生效。</p>
+        <div id="settings-agents"></div>
+        <div class="form-label" style="margin-top:18px">项目</div>
+        <div id="settings-projects"></div>
+        <div class="form-label" style="margin-top:18px">WebDAV 云同步</div>
+        <div class="agent-block" id="webdav-block">
+          <div class="wd-grid">
+            <label>服务器地址</label>
+            <input id="wd-url" class="input" placeholder="https://dav.jianguoyun.com/dav/" />
+            <label>用户名</label>
+            <input id="wd-user" class="input" autocomplete="off" placeholder="账号 / 应用密码专用账号" />
+            <label>密码</label>
+            <input id="wd-pass" type="password" class="input" autocomplete="new-password" placeholder="建议使用服务方签发的应用密码" />
+            <label>远程目录</label>
+            <input id="wd-path" class="input" placeholder="cc-skill-sync（无需以 / 开头）" />
+          </div>
+          <div class="wd-actions">
+            <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--text-2)">
+              <input type="checkbox" id="wd-auto" /> 自动备份
+            </label>
+            <select id="wd-freq" class="input" style="width:auto;height:28px;padding-right:26px">
+              <option value="startup">每次启动时</option>
+              <option value="daily">每天</option>
+              <option value="weekly">每周</option>
+            </select>
+            <button class="btn sm" id="btn-wd-save">保存配置</button>
+            <button class="btn sm" id="btn-wd-test">测试连接</button>
+            <button class="btn sm primary" id="btn-wd-backup">立即备份</button>
+            <button class="btn sm" id="btn-wd-restore">恢复最近备份…</button>
+            <button class="btn sm" id="btn-wd-up-cfg" title="把 Agents / 项目 / WebDAV 配置上传为云端的 cc-skill-config.json">上传配置</button>
+            <button class="btn sm" id="btn-wd-down-cfg" title="从云端下载配置并覆盖本机设置">恢复配置</button>
+          </div>
+          <div class="hint" id="wd-status" style="margin-top:8px">备份内容 = 全局 + 项目内所有实体 SKILL（链接不会上传）；密码保存在本机配置文件中，请注意磁盘安全。</div>
+        </div>
+        <div class="form-label" style="margin-top:18px">配置管理</div>
+        <div class="agent-block">
+          <div class="hint" style="margin-bottom:10px">把 Agents、项目、WebDAV 配置导出为 JSON 文件随身携带；或通过 WebDAV 在多台设备间同步配置。</div>
+          <div class="wd-actions">
+            <button class="btn sm" id="btn-cfg-export">导出配置到文件</button>
+            <button class="btn sm" id="btn-cfg-import">从文件导入配置</button>
+          </div>
+        </div>
+        <div class="settings-actions">
+          <button class="btn" id="btn-add-project">＋ 添加项目</button>
+          <button class="btn" id="btn-add-agent">＋ 添加自定义 Agent</button>
+          <button class="btn" id="btn-reset-agents">恢复默认</button>
+        </div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn" data-close="modal-settings">取消</button>
+        <button class="btn primary" id="btn-save-settings">保存设置</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 合并重复弹窗 -->
+  <div class="modal-overlay hidden" id="modal-dups">
+    <div class="modal modal-wide">
+      <div class="modal-head">
+        <div class="modal-title">合并重复 SKILL · 一份实体 + N 个链接</div>
+        <button class="modal-close" data-close="modal-dups">×</button>
+      </div>
+      <div class="modal-body">
+        <p class="hint">同一 SKILL 在多个目录各有一份实体副本时，可只保留一份，其余移入回收站并替换为「链接」——之后只需维护保留的那份，所有 Agent 即时生效。多份内容不同时请先确认保留哪份。</p>
+        <div id="dups-list"></div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn" data-close="modal-dups">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 操作日志弹窗 -->
+  <div class="modal-overlay hidden" id="modal-logs">
+    <div class="modal modal-wide">
+      <div class="modal-head">
+        <div class="modal-title">操作日志</div>
+        <button class="modal-close" data-close="modal-logs">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="logs-toolbar">
+          <span class="hint">扫描 / 安装 / 合并 / 删除的结果都会记录在这里，程序异常也会被捕获；错误提示可直接点击查看。</span>
+          <div style="display:flex;gap:8px">
+            <button class="btn sm" id="btn-open-logfile" title="用系统默认编辑器打开磁盘日志">打开日志文件</button>
+            <button class="btn sm" id="btn-clear-logs">清空</button>
+          </div>
+        </div>
+        <ul class="log-list" id="log-list"></ul>
+      </div>
+      <div class="modal-foot">
+        <button class="btn" data-close="modal-logs">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toasts"></div>
+  <script src="app.js"></script>
+</body>
+</html>

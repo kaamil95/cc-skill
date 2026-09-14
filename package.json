@@ -1,0 +1,56 @@
+{
+  "name": "cc-skill",
+  "productName": "CC Skill",
+  "version": "0.0.1",
+  "description": "统一管理 Claude Code / Codex / OpenClaw / ZCode / Qoder 等 AI Agent 的 SKILL —— 链接共享、去重合并、项目级管理、WebDAV 备份 | Manage AI agent SKILLs across CLIs from one desktop app",
+  "author": "kaamil",
+  "license": "MIT",
+  "main": "main.js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com.ccskill.app.git"
+  },
+  "homepage": "https://github.com.ccskill.app#readme",
+  "bugs": "https://github.com.ccskill.app/issues",
+  "keywords": [
+    "electron",
+    "ai-agent",
+    "skills",
+    "claude-code",
+    "codex",
+    "openclaw",
+    "zcode",
+    "qoder",
+    "webdav",
+    "windows"
+  ],
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win portable"
+  },
+  "build": {
+    "appId": "com.ccskill.app",
+    "productName": "CC Skill",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer/**/*"
+    ],
+    "win": {
+      "target": [
+        "portable"
+      ],
+      "icon": "assets/icon.ico"
+    }
+  },
+  "devDependencies": {
+    "electron": "^44.3.0",
+    "electron-builder": "^26.15.3"
+  },
+  "dependencies": {
+    "marked": "^18.0.13"
+  }
+}
