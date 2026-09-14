@@ -16,3 +16,6 @@ Thumbs.db
 .idea/
 .vscode/
 *.iml
+
+# 临时脚本/产物
+.tmp-*
