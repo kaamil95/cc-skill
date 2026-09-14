@@ -60,7 +60,7 @@ function toast(msg, type = '') {
   el.className = 'toast ' + type;
   el.textContent = msg;
   if (type === 'err') {
-    el.title = '点击查看操作日志';
+    el.title = t('点击查看操作日志');
     el.addEventListener('click', () => { el.remove(); openLogs(); });
   }
   $('#toasts').appendChild(el);
@@ -71,10 +71,10 @@ function toast(msg, type = '') {
 function renderLogs() {
   const list = $('#log-list');
   if (!state.logs.length) {
-    list.innerHTML = '<li class="log-empty">暂无日志</li>';
+    list.innerHTML = '<li class="log-empty">' + t('暂无日志') + '</li>';
     return;
   }
-  const tag = (t) => (t === 'err' ? '错误' : t === 'ok' ? '成功' : '信息');
+  const tag = (t) => (t === 'err' ? t('错误') : t === 'ok' ? t('成功') : t('信息'));
   list.innerHTML = state.logs
     .map((e) => `
     <li class="log-item ${e.type}">
@@ -101,10 +101,10 @@ function openLogs() {
 }
 
 // 捕获程序异常，避免出错却无提示
-window.addEventListener('error', (e) => toast('程序异常：' + (e.message || '未知错误'), 'err'));
+window.addEventListener('error', (e) => toast(t('程序异常：') + (e.message || t('未知错误')), 'err'));
 window.addEventListener('unhandledrejection', (e) => {
   const r = e.reason;
-  toast('异步操作异常：' + ((r && (r.message || r)) || '未知错误'), 'err');
+  toast(t('异步操作异常：') + ((r && (r.message || r)) || t('未知错误')), 'err');
 });
 
 // ------------------------------ 弹窗 ----------------------------------------
@@ -165,7 +165,7 @@ function renderSidebar() {
       </div>`;
     })
     .join('');
-  $('#sidebar-foot').innerHTML = `${state.view.length} 个 SKILL<br>${state.agents.reduce((n, a) => n + (a.dirs || []).length, 0)} 个 SKILL 目录 · ${state.projects.length} 个项目`;
+  $('#sidebar-foot').innerHTML = tf('{gn} 个 SKILL · {dn} 个 SKILL 目录 · {pn} 个项目', { gn: state.view.length, dn: state.agents.reduce((n, a) => n + (a.dirs || []).length, 0), pn: state.projects.length });
   $$('#agent-nav .nav-item').forEach((el) =>
     el.addEventListener('click', () => setFilter(el.dataset.filter))
   );
@@ -197,7 +197,7 @@ function renderProjectNav() {
     items +
     `<div class="nav-item nav-add" id="nav-add-project" title="选择一个项目目录，扫描其中的 SKILL">
       <span class="nav-icon">＋</span>
-      <span class="nav-name">添加项目</span>
+      <span class="nav-name">${t('添加项目')}</span>
     </div>`;
   $$('#project-nav .nav-item:not(.nav-add)').forEach((el2) =>
     el2.addEventListener('click', () => setFilter(el2.dataset.filter))
@@ -211,14 +211,14 @@ async function addProjectFlow() {
   const dir = toTilde(await api.invoke('dialog:pickFolder'));
   if (!dir) return;
   if (state.projects.some((p) => p.dir.toLowerCase() === dir.toLowerCase())) {
-    toast('该项目已在列表中', 'err');
+    toast(t('该项目已在列表中'), 'err');
     return;
   }
   const name = dir.split(/[\\/]+/).filter(Boolean).pop() || dir;
   const projects = state.projects.concat([{ id: 'proj-' + Date.now(), name, dir }]);
   const r = await api.invoke('config:set', { agents: state.agents, projects });
   if (!r.ok) {
-    toast('添加失败', 'err');
+    toast(t('添加失败'), 'err');
     return;
   }
   state.projects = r.projects || projects;
@@ -234,16 +234,16 @@ function setFilter(f) {
   $$('#agent-nav .nav-item').forEach((el) => el.classList.toggle('active', el.dataset.filter === f));
   $$('#project-nav .nav-item').forEach((el) => el.classList.toggle('active', el.dataset.filter === f));
   if (f === 'dashboard') {
-    $('#main-title').textContent = '总览';
+    $('#main-title').textContent = t('总览');
     renderGrid();
     return;
   }
   if (String(f).startsWith('project:')) {
     const proj = state.projects.find((p) => p.id === f.slice(8));
-    $('#main-title').textContent = proj ? `${proj.name} · SKILL` : '项目 SKILL';
+    $('#main-title').textContent = proj ? tf('{name} · SKILL', { name: proj.name }) : t('项目 SKILL');
   } else {
     const a = agentById(f);
-    $('#main-title').textContent = a ? `${a.name} 的 SKILL` : '全部 SKILL';
+    $('#main-title').textContent = a ? tf('{name} 的 SKILL', { name: a.name }) : t('全部 SKILL');
   }
   renderGrid();
 }
@@ -260,22 +260,22 @@ function cardHTML(s) {
       })
     )
     .join('');
-  const type = s.type === 'file' ? '<span class="card-type">单文件</span>' : '';
+  const type = s.type === 'file' ? '<span class="card-type">' + t('单文件') + '</span>' : '';
   const linkBadge = s.dangling
-    ? '<span class="card-type warn" title="源 SKILL 已被删除或移动">⚠ 失效链接</span>'
+    ? '<span class="card-type warn" title="' + t('源 SKILL 已被删除或移动') + '">' + t('⚠ 失效链接') + '</span>'
     : s.linked
-      ? '<span class="card-type link" title="链接：只存一份，源更新即时生效">🔗 链接</span>'
+      ? '<span class="card-type link" title="' + t('链接：只存一份，源更新即时生效') + '">' + t('🔗 链接') + '</span>'
       : s.linkCount
         ? `<span class="card-type link" title="${s.linkCount} 个 Agent 通过链接共用此唯一副本">🔗×${s.linkCount}</span>`
         : '';
   const dirName = s.type === 'file' ? s.folder + '.md' : s.folder;
-  const pathText = s.dangling ? '源已丢失' : s.linked ? '→ ' + shortPath(s.linkTarget || s.absPath) : dirName;
+  const pathText = s.dangling ? t('源已丢失') : s.linked ? '→ ' + shortPath(s.linkTarget || s.absPath) : dirName;
   const pathTip = s.linked ? (s.linkTarget || s.absPath) : s.absPath;
   return `<div class="card" data-key="${esc(s.key)}">
     <div class="card-top">
       <div class="card-name">${esc(s.name)}${type}${linkBadge}</div>
     </div>
-    <div class="card-desc" title="${esc(s.description)}">${esc(s.description) || '<span style="opacity:.55">（无描述）</span>'}</div>
+    <div class="card-desc" title="${esc(s.description)}">${esc(s.description) || '<span style="opacity:.55">' + t('（无描述）') + '</span>'}</div>
     <div class="card-foot">
       <div style="display:flex;gap:5px;overflow:hidden">${chips}</div>
       <span class="card-path" title="${esc(pathTip)}">${esc(pathText)}</span>
@@ -297,12 +297,12 @@ function renderDashboard() {
   const files = state.skills.reduce((n, s) => n + (s.fileCount || 0), 0);
 
   const tiles = [
-    { n: global.length, label: '全局 SKILL' },
-    { n: projSkills.length, label: '项目 SKILL' },
+    { n: global.length, label: t('全局 SKILL') },
+    { n: projSkills.length, label: t('项目 SKILL') },
     { n: state.agents.length, label: 'Agent' },
-    { n: state.projects.length, label: '项目' },
-    { n: links, label: '链接安装' },
-    { n: dupGroups, label: '待合并重复组', warn: dupGroups > 0 },
+    { n: state.projects.length, label: t('项目') },
+    { n: links, label: t('链接安装') },
+    { n: dupGroups, label: t('待合并重复组'), warn: dupGroups > 0 },
   ];
   const missingByAgent = new Map();
   for (const m of state.missing) for (const id of m.agentIds) missingByAgent.set(id, (missingByAgent.get(id) || 0) + 1);
@@ -314,7 +314,7 @@ function renderDashboard() {
       return `<div class="dash-row">
         <span class="dot" style="background:${esc(a.color)}"></span>
         <span class="dash-name">${esc(a.name)}</span>
-        <span class="dash-sub">${miss ? `<span class="dash-warn">⚠ ${miss} 个目录缺失</span>` : `${a.dirs.length} 个目录`}</span>
+        <span class="dash-sub">${miss ? `<span class="dash-warn">⚠ ${tf('{n} 个目录缺失', { n: miss })}</span>` : tf('{n} 个目录', { n: a.dirs.length })}</span>
         <span class="dash-n">${n}</span>
       </div>`;
     })
@@ -331,71 +331,71 @@ function renderDashboard() {
           </div>`;
         })
         .join('')
-    : '<div class="hint" style="padding:8px 2px">还没有添加项目，可在「设置 → 项目」中添加。</div>';
+    : '<div class="hint" style="padding:8px 2px">' + t('还没有添加项目，可在「设置 → 项目」中添加。') + '</div>';
   const logRows = state.logs.length
     ? state.logs
         .slice(0, 6)
         .map(
           (e) => `<div class="dash-row">
             <span class="log-time">${e.time.toLocaleTimeString('zh-CN', { hour12: false })}</span>
-            <span class="log-type ${e.type === 'err' ? 'err' : e.type === 'ok' ? 'ok' : ''}">${e.type === 'err' ? '错误' : e.type === 'ok' ? '成功' : '信息'}</span>
+            <span class="log-type ${e.type === 'err' ? 'err' : e.type === 'ok' ? 'ok' : ''}">${e.type === 'err' ? t('错误') : e.type === 'ok' ? t('成功') : t('信息')}</span>
             <span class="dash-sub" style="flex:1;white-space:normal">${esc(e.msg)}</span>
           </div>`
         )
         .join('')
-    : '<div class="hint" style="padding:8px 2px">暂无操作记录；安装 / 合并 / 删除的结果都会记录在「操作日志」中。</div>';
+    : '<div class="hint" style="padding:8px 2px">' + t('暂无操作记录；安装 / 合并 / 删除的结果都会记录在「操作日志」中。') + '</div>';
 
   const q = state.search.trim().toLowerCase();
   const match = (s) => !q || (s.name + ' ' + (s.description || '') + ' ' + s.folder).toLowerCase().includes(q);
-  const sections = [{ title: '全局 SKILL', tag: '', items: state.view.filter((s) => !s.project && match(s)) }]
+  const sections = [{ title: t('全局 SKILL'), tag: '', items: state.view.filter((s) => !s.project && match(s)) }]
     .concat(
       state.projects.map((p) => ({
         title: p.name,
-        tag: '项目',
+        tag: t('项目'),
         dir: p.dir,
         items: state.view.filter((s) => s.project && s.project.id === p.id && match(s)),
       }))
     )
     .filter((sec) => sec.items.length);
   const totalListed = sections.reduce((n, sec) => n + sec.items.length, 0);
-  $('#main-hint').textContent = `共 ${totalListed} 个 SKILL`;
+  $('#main-hint').textContent = tf('共 {n} 个 SKILL', { n: totalListed });
   $('#grid').innerHTML = `
     <div class="stat-grid">
       ${tiles.map((t) => `<div class="stat-tile"><div class="stat-n ${t.warn ? 'warn' : ''}">${t.n}</div><div class="stat-label">${t.label}</div></div>`).join('')}
     </div>
     <div class="dash-actions">
-      <button class="btn" id="dash-rescan">⟳ 重新扫描</button>
-      <button class="btn tinted" id="dash-dups">合并重复</button>
-      <button class="btn" id="dash-new">＋ 新建 SKILL</button>
-      <button class="btn" id="dash-import">导入 SKILL</button>
+id="dash-rescan">${t('⟳ 重新扫描')}</button>
+id="dash-dups">${t('合并重复')}</button>
+id="dash-new">${t('＋ 新建 SKILL')}</button>
+id="dash-import">${t('导入 SKILL')}</button>
     </div>
     <div class="dash-cols">
       <div class="agent-block">
-        <div class="dash-sec">AGENT 分布</div>
-        ${agentRows || '<div class="hint">无</div>'}
+        <div class="dash-sec">${t('AGENT 分布')}</div>
+        ${agentRows || t('<div class="hint">无</div>')}
       </div>
       <div class="agent-block">
-        <div class="dash-sec">项目分布</div>
+        <div class="dash-sec">${t('项目分布')}</div>
         ${projRows}
       </div>
     </div>
     <div class="agent-block">
-      <div class="dash-sec">最近动态 <span class="hint">（共 ${state.logs.length} 条，详见操作日志）</span></div>
+      <div class="dash-sec">${t('最近动态')} <span class="hint">（${tf('共 {n} 条', { n: state.logs.length })}，${t('详见操作日志')}）</span></div>
       ${logRows}
     </div>
-    ${dangling ? `<div class="link-hint warn">⚠ 检测到 ${dangling} 个失效链接（源已被删除），可在列表中筛选清理。</div>` : ''}
+    ${dangling ? `<div class="link-hint warn">${tf('⚠ 检测到 {n} 个失效链接（源已被删除），可在列表中筛选清理。', { n: dangling })}</div>` : ''}
     ${q && !totalListed
       ? `<div class="empty"><div class="big">${SEARCH_BIG}</div>没有匹配「${esc(q)}」的 SKILL</div>`
       : sections
           .map(
             (sec) => `
-      <div class="section-head"><h3>${esc(sec.title)}</h3>${sec.tag ? `<span class="chip proj-chip">${esc(sec.tag)}</span>` : ''}${sec.dir ? `<span class="sec-path" title="${esc(sec.dir)}">${esc(shortPath(sec.dir))}</span>` : ''}<span class="hint">${sec.items.length} 个</span></div>
+      <div class="section-head"><h3>${esc(sec.title)}</h3>${sec.tag ? `<span class="chip proj-chip">${esc(sec.tag)}</span>` : ''}${sec.dir ? `<span class="sec-path" title="${esc(sec.dir)}">${esc(shortPath(sec.dir))}</span>` : ''}<span class="hint">${tf('{n} 个', { n: sec.items.length })}</span></div>
       <div class="grid">${sec.items.map(cardHTML).join('')}</div>`
           )
           .join('')}
   `;
   bindCards();
-  $('#dash-rescan').addEventListener('click', () => { scan(); toast('已重新扫描'); });
+  $('#dash-rescan').addEventListener('click', () => { scan(); toast(t('已重新扫描')); });
   $('#dash-dups').addEventListener('click', openDupsModal);
   $('#dash-new').addEventListener('click', openNewModal);
   $('#dash-import').addEventListener('click', () => $('#btn-import').click());
@@ -412,11 +412,11 @@ function renderGrid() {
   // 「全部」视图按 全局 / 各项目 分区展示；其他过滤条件为单一大区
   let sections;
   if (state.filter === 'all') {
-    sections = [{ title: '全局', tag: '', items: state.view.filter((s) => !s.project && match(s)) }]
+    sections = [{ title: t('全局'), tag: '', items: state.view.filter((s) => !s.project && match(s)) }]
       .concat(
         state.projects.map((p) => ({
           title: p.name,
-          tag: '项目',
+          tag: t('项目'),
           items: state.view.filter((s) => s.project && s.project.id === p.id && match(s)),
         }))
       )
@@ -438,12 +438,12 @@ function renderGrid() {
 
   if (!state.view.length) {
     grid.innerHTML = `<div class="empty"><div class="big">${FOLDER_BIG}</div>
-      还没有扫描到任何 SKILL。<br>点击右上角「设置」检查各 Agent 的 SKILL 目录，或「新建 SKILL」「导入 SKILL」。</div>`;
+      t('还没有扫描到任何 SKILL。<br>点击右上角「设置」检查各 Agent 的 SKILL 目录，或「新建 SKILL」「导入 SKILL」。')</div>`;
     return;
   }
   if (!total) {
     grid.innerHTML = `<div class="empty"><div class="big">${SEARCH_BIG}</div>${
-      q ? `没有匹配「${esc(q)}」的 SKILL` : '当前筛选下暂无 SKILL'
+      q ? `没有匹配「${esc(q)}」的 SKILL` : t('当前筛选下暂无 SKILL')
     }</div>`;
     return;
   }
@@ -451,7 +451,7 @@ function renderGrid() {
   grid.innerHTML = sections
     .map(
       (sec) => `
-    ${sec.title ? `<div class="section-head"><h3>${esc(sec.title)}</h3>${sec.tag ? `<span class="chip proj-chip">${esc(sec.tag)}</span>` : ''}<span class="hint">${sec.items.length} 个</span></div>` : ''}
+    ${sec.title ? `<div class="section-head"><h3>${esc(sec.title)}</h3>${sec.tag ? `<span class="chip proj-chip">${esc(sec.tag)}</span>` : ''}<span class="hint">${tf('{n} 个', { n: sec.items.length })}</span></div>` : ''}
     <div class="grid">${sec.items.map(cardHTML).join('')}</div>`
     )
     .join('');
@@ -482,17 +482,17 @@ function openDetail(s) {
     )
     .join('');
   $('#detail-meta').innerHTML = chips + `<span class="path" title="${esc(s.absPath)}">${esc(s.absPath)}</span>`;
-  $('#btn-detail-copy').textContent = s.project ? '提取到全局…' : '复制到其他 Agent…';
+  $('#btn-detail-copy').textContent = s.project ? t('提取到全局…') : t('复制到其他 Agent…');
   const hint = $('#detail-hint');
   if (s.dangling) {
     hint.className = 'link-hint warn';
-    hint.textContent = '⚠ 此条目是失效链接：源 SKILL 已被删除或移动，可安全清理。';
+    hint.textContent = t('⚠ 此条目是失效链接：源 SKILL 已被删除或移动，可安全清理。');
   } else if (s.linked) {
     hint.className = 'link-hint';
-    hint.textContent = `🔗 此条目是链接，唯一副本位于 ${shortPath(s.linkTarget || '')}，在这里编辑即修改唯一副本。`;
+    hint.textContent = tf('🔗 此条目是链接，唯一副本位于 {p}，在这里编辑即修改唯一副本。', { p: shortPath(s.linkTarget || '') });
   } else if (s.linkCount) {
     hint.className = 'link-hint';
-    hint.textContent = `🔗 此副本是唯一实体，另有 ${s.linkCount} 个 Agent 通过链接共用它；在这里更新，所有 Agent 即时生效。`;
+    hint.textContent = tf('🔗 此副本是唯一实体，另有 {n} 个 Agent 通过链接共用它；在这里更新，所有 Agent 即时生效。', { n: s.linkCount });
   } else {
     hint.className = 'hidden';
     hint.textContent = '';
@@ -502,8 +502,8 @@ function openDetail(s) {
   $('#panel-files').classList.add('hidden');
   $('#panel-links').classList.add('hidden');
   $$('.tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === 'preview'));
-  $('#detail-editor').value = '加载中…';
-  $('#detail-files').innerHTML = '<li>加载中…</li>';
+  $('#detail-editor').value = t('加载中…');
+  $('#detail-files').innerHTML = t('<li>加载中…</li>');
   openModal('modal-detail');
 
   api.invoke('skill:read', { path: s.skillMdPath }).then((r) => {
@@ -511,16 +511,16 @@ function openDetail(s) {
       $('#detail-md').innerHTML = api.md(r.body);
       $('#detail-editor').value = r.content;
     } else {
-      $('#detail-md').textContent = '读取失败：' + (r.error || '');
+      $('#detail-md').textContent = t('读取失败：') + (r.error || '');
     }
   });
   api.invoke('skill:files', { dir: s.type === 'folder' ? s.absPath : s.parentDir, type: s.type }).then((r) => {
     if (!r.ok || !r.files.length) {
-      $('#detail-files').innerHTML = `<li style="color:var(--muted)">${s.type === 'file' ? '单文件 SKILL（' + esc(s.folder) + '.md）' : '空目录'}</li>`;
+      $('#detail-files').innerHTML = `<li style="color:var(--muted)">${s.type === 'file' ? t('单文件 SKILL（') + esc(s.folder) + '.md）' : t('空目录')}</li>`;
       return;
     }
     $('#detail-files').innerHTML = r.files
-      .map((f) => `<li>${f.isDir ? FOLDER_SVG : FILE_SVG}<span>${esc(f.name)}</span><span class="fsize">${f.isDir ? '目录' : fmtSize(f.size)}</span></li>`)
+      .map((f) => `<li>${f.isDir ? FOLDER_SVG : FILE_SVG}<span>${esc(f.name)}</span><span class="fsize">${f.isDir ? t('目录') : fmtSize(f.size)}</span></li>`)
       .join('');
   });
   renderDetailLinks(s);
@@ -531,7 +531,7 @@ function openDetail(s) {
 function renderDetailLinks(s) {
   const box = $('#detail-links');
   if (s.type !== 'folder') {
-    box.innerHTML = '<div class="log-empty" style="padding:26px">单文件 SKILL 暂不支持链接安装</div>';
+    box.innerHTML = t('<div class="log-empty" style="padding:26px">单文件 SKILL 暂不支持链接安装</div>');
     $('#btn-add-link').disabled = true;
     return;
   }
@@ -544,7 +544,7 @@ function renderDetailLinks(s) {
   box.innerHTML = s.links
     .map((l) => `
     <div class="link-row" data-path="${esc(l.absPath)}" data-dir="${esc(l.parentDir)}" data-name="${esc(l.name)}" data-canon-key="${esc(s.key)}">
-      <span class="link-tag ${l.dangling ? 'bad' : ''}">${l.dangling ? '⚠ 失效' : '正常'}</span>
+      <span class="link-tag ${l.dangling ? 'bad' : ''}">${l.dangling ? t('⚠ 失效') : t('正常')}</span>
       <span class="dup-agents">${l.agentIds
         .map((id) => {
           const a = agentById(id);
@@ -573,10 +573,10 @@ $('#detail-links').addEventListener('click', async (e) => {
   if (!confirm(`卸载链接「${row.dataset.name}」？\n仅移除链接，唯一副本不受影响：\n${row.dataset.path}`)) return;
   const r = await api.invoke('skill:trash', { path: row.dataset.path });
   if (!r.ok) {
-    toast('卸载失败：' + (r.error || ''), 'err');
+    toast(t('卸载失败：') + (r.error || ''), 'err');
     return;
   }
-  toast('已卸载链接（唯一副本保留）', 'ok');
+  toast(t('已卸载链接（唯一副本保留）'), 'ok');
   await scan();
   const fresh = state.view.find((x) => x.key === row.dataset.canonKey);
   if (fresh) openDetail(fresh);
@@ -594,9 +594,9 @@ $$('.tab').forEach((t) =>
 $('#btn-save-skill').addEventListener('click', async () => {
   const r = await api.invoke('skill:write', { path: state.detail.skillMdPath, content: $('#detail-editor').value });
   if (r.ok) {
-    toast('已保存 ✓', 'ok');
+    toast(t('已保存 ✓'), 'ok');
     scan();
-  } else toast('保存失败：' + (r.error || ''), 'err');
+  } else toast(t('保存失败：') + (r.error || ''), 'err');
 });
 
 $('#btn-detail-open').addEventListener('click', () => {
@@ -620,10 +620,10 @@ async function deleteSkill(s, closeAfter = false) {
   if (!confirm(msg)) return;
   const r = await api.invoke('skill:trash', { path: s.absPath });
   if (r.ok) {
-    toast(r.linkRemoved ? '已移除链接（唯一副本保留）🗑' : '已移入回收站 🗑', 'ok');
+    toast(r.linkRemoved ? t('已移除链接（唯一副本保留）🗑') : t('已移入回收站 🗑'), 'ok');
     if (closeAfter) closeModal('modal-detail');
     scan();
-  } else toast('删除失败：' + (r.error || ''), 'err');
+  } else toast(t('删除失败：') + (r.error || ''), 'err');
 }
 
 // --------------------------- 目标目录选择（公用） ----------------------------
@@ -653,7 +653,7 @@ const isProjectTarget = (v) => { const norm = String(v || '').replace(/[\\/]+/g,
 function openCopyModal(s, preferLink = false) {
   const fromProject = !!s.project;
   $('#copy-src').innerHTML =
-    `将安装 <b>${esc(s.name)}</b>（${s.type === 'folder' ? '整目录' : '单文件'}）` +
+    `将安装 <b>${esc(s.name)}</b>（${s.type === 'folder' ? t('整目录') : t('单文件')}）` +
     (fromProject ? ` <span class="chip proj-chip">${esc(s.project.name)}</span>` : '');
   const linkAllowed = s.type === 'folder';
   $('#copy-link-label').style.display = linkAllowed ? '' : 'none';
@@ -670,7 +670,7 @@ async function doInstall(s, forceCopy) {
   const destDir = $('#copy-dir').value;
   if (mode === 'link' && isProjectTarget(destDir)) {
     mode = 'copy';
-    toast('项目目录通常是 Git 仓库，链接有误提交风险，已改为复制副本');
+    toast(t('项目目录通常是 Git 仓库，链接有误提交风险，已改为复制副本'));
   }
   const r = await api.invoke('skill:copy', {
     srcPath: s.absPath,
@@ -681,19 +681,19 @@ async function doInstall(s, forceCopy) {
     mode,
   });
   if (r.ok) {
-    toast(r.linked ? '已创建链接（单一副本）✓' : isProjectTarget(destDir) ? '已安装到项目 ✓' : '已复制到全局 ✓', 'ok');
+    toast(r.linked ? t('已创建链接（单一副本）✓') : isProjectTarget(destDir) ? t('已安装到项目 ✓') : t('已复制到全局 ✓'), 'ok');
     closeModal('modal-copy');
     scan();
     return;
   }
   if (r.reason === 'cross-volume') {
-    toast('源与目标不在同一磁盘，无法创建链接，已改为复制副本');
+    toast(t('源与目标不在同一磁盘，无法创建链接，已改为复制副本'));
     return doInstall(s, true);
   }
   if (r.reason === 'exists') {
-    toast('目标已存在同名 SKILL，请选择覆盖或自动重命名', 'err');
+    toast(t('目标已存在同名 SKILL，请选择覆盖或自动重命名'), 'err');
   } else {
-    toast('操作失败：' + (r.error || ''), 'err');
+    toast(t('操作失败：') + (r.error || ''), 'err');
   }
 }
 // ------------------------------ 新建 SKILL ------------------------------------
@@ -708,7 +708,7 @@ function openNewModal() {
 $('#btn-new-go').addEventListener('click', async () => {
   const name = $('#new-name').value.trim();
   if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{1,63}$/.test(name)) {
-    toast('SKILL 名称只能包含英文、数字、- 和 _，且不超过 64 字符', 'err');
+    toast(t('SKILL 名称只能包含英文、数字、- 和 _，且不超过 64 字符'), 'err');
     return;
   }
   const destDir = $('#new-dir').value;
@@ -728,9 +728,9 @@ $('#btn-new-go').addEventListener('click', async () => {
       openDetail(created);
     }
   } else if (r.reason === 'exists') {
-    toast('目标目录已存在同名 SKILL', 'err');
+    toast(t('目标目录已存在同名 SKILL'), 'err');
   } else {
-    toast('创建失败：' + (r.error || ''), 'err');
+    toast(t('创建失败：') + (r.error || ''), 'err');
   }
 });
 
@@ -742,14 +742,14 @@ async function inspectImport(source) {
     $('#import-form').classList.add('hidden');
     $('#btn-import-go').disabled = true;
     state.importSrc = null;
-    toast(r.reason === 'no-skill' ? '未在其中找到 SKILL.md，请确认是 SKILL 文件夹/压缩包' : '读取失败：' + (r.error || ''), 'err');
+    toast(r.reason === 'no-skill' ? t('未在其中找到 SKILL.md，请确认是 SKILL 文件夹/压缩包') : t('读取失败：') + (r.error || ''), 'err');
     return;
   }
   state.importSrc = r;
   $('#import-preview').classList.remove('hidden');
   $('#import-preview').innerHTML = `
     <div class="ip-name">${esc(r.name)}</div>
-    <div class="ip-desc">${esc(r.description) || '（无描述）'}</div>
+    <div class="ip-desc">${esc(r.description) || t('（无描述）')}</div>
     <div class="ip-path">${esc(r.skillRoot)} · ${r.fileCount} 个文件</div>`;
   $('#import-form').classList.remove('hidden');
   $('#btn-import-go').disabled = false;
@@ -775,7 +775,7 @@ $('#btn-import-go').addEventListener('click', async () => {
     onConflict: $('input[name=import-conflict]:checked').value,
   });
   if (r.ok) {
-    toast(isProjectTarget(destDir) ? '已导入到项目 ✓' : '导入成功 ✓', 'ok');
+    toast(isProjectTarget(destDir) ? t('已导入到项目 ✓') : t('导入成功 ✓'), 'ok');
     closeModal('modal-import');
     state.importSrc = null;
     await scan();
@@ -784,9 +784,9 @@ $('#btn-import-go').addEventListener('click', async () => {
       if (proj) setFilter('project:' + proj.id);
     }
   } else if (r.reason === 'exists') {
-    toast('目标已存在同名 SKILL，请选择覆盖或自动重命名', 'err');
+    toast(t('目标已存在同名 SKILL，请选择覆盖或自动重命名'), 'err');
   } else {
-    toast('导入失败：' + (r.error || ''), 'err');
+    toast(t('导入失败：') + (r.error || ''), 'err');
   }
 });
 
@@ -802,14 +802,14 @@ function fillWebdavInputs(w) {
   $('#wd-path').value = w.remotePath || 'cc-skill-sync';
   $('#wd-auto').checked = !!w.autoBackup;
   $('#wd-freq').value = w.autoBackupFreq || 'startup';
-  $('#wd-status').textContent = '备份内容 = 全局 + 项目内所有实体 SKILL（链接不会上传）；密码保存在本机配置文件中，请注意磁盘安全。';
+  $('#wd-status').textContent = t('备份内容 = 全局 + 项目内所有实体 SKILL（链接不会上传）；密码保存在本机配置文件中，请注意磁盘安全。');
 }
 
 function openSettings() {
   state.editingAgents = JSON.parse(JSON.stringify(state.agents));
   state.editingProjects = JSON.parse(JSON.stringify(state.projects));
   fillWebdavInputs(state.webdav);
-  $('#wd-status').textContent = '备份内容 = 全局 + 项目内所有实体 SKILL（链接不会上传）；密码保存在本机配置文件中，请注意磁盘安全。';
+  $('#wd-status').textContent = t('备份内容 = 全局 + 项目内所有实体 SKILL（链接不会上传）；密码保存在本机配置文件中，请注意磁盘安全。');
   renderSettings();
   renderSettingsProjects();
   openModal('modal-settings');
@@ -832,53 +832,53 @@ async function wdSave() {
   return r.ok;
 }
 $('#btn-wd-save').addEventListener('click', async () => {
-  (await wdSave()) ? toast('WebDAV 配置已保存 ✓', 'ok') : toast('保存失败', 'err');
+  (await wdSave()) ? toast(t('WebDAV 配置已保存 ✓'), 'ok') : toast(t('保存失败'), 'err');
 });
 $('#btn-wd-test').addEventListener('click', async () => {
   if (!(await wdSave())) return;
-  $('#wd-status').textContent = '正在测试连接…';
+  $('#wd-status').textContent = t('正在测试连接…');
   const r = await api.invoke('sync:test');
   if (r.ok) {
     const detail = r.created
-      ? '，远程目录不存在，已自动创建'
+      ? t('，远程目录不存在，已自动创建')
       : r.needsManual
-        ? '；但该服务不支持通过 WebDAV 建目录——请到网盘网页端手动创建该文件夹（一次性），完成后即可备份'
-        : '，远程目录已存在';
-    $('#wd-status').textContent = '✓ 连接成功' + detail;
-    toast('WebDAV 连接成功 ✓', 'ok');
+        ? t('；但该服务不支持通过 WebDAV 建目录——请到网盘网页端手动创建该文件夹（一次性），完成后即可备份')
+        : t('，远程目录已存在');
+    $('#wd-status').textContent = t('✓ 连接成功') + detail;
+    toast(t('WebDAV 连接成功 ✓'), 'ok');
   } else {
-    $('#wd-status').textContent = '✗ 连接失败：' + r.error;
-    toast('WebDAV 连接失败：' + r.error, 'err');
+    $('#wd-status').textContent = t('✗ 连接失败：') + r.error;
+    toast(t('WebDAV 连接失败：') + r.error, 'err');
   }
 });
 $('#btn-wd-backup').addEventListener('click', async () => {
   if (!(await wdSave())) return;
-  if (!confirm('将所有实体 SKILL（全局 + 项目）打包备份到 WebDAV？\n（链接本身不上传，恢复时会按记录重建）')) return;
-  $('#wd-status').textContent = '正在打包并上传…';
+  if (!confirm(t('将所有实体 SKILL（全局 + 项目）打包备份到 WebDAV？\n（链接本身不上传，恢复时会按记录重建）'))) return;
+  $('#wd-status').textContent = t('正在打包并上传…');
   const r = await api.invoke('sync:backup');
   if (r.ok) {
     const kb = r.size < 1048576 ? (r.size / 1024).toFixed(0) + ' KB' : (r.size / 1048576).toFixed(1) + ' MB';
     $('#wd-status').textContent = `✓ 已上传 ${r.name}（${r.count} 个 SKILL / ${kb}）`;
     toast(`已备份 ${r.count} 个 SKILL 到云端 ✓`, 'ok');
   } else {
-    $('#wd-status').textContent = '✗ 备份失败：' + r.error;
-    toast('备份失败：' + r.error, 'err');
+    $('#wd-status').textContent = t('✗ 备份失败：') + r.error;
+    toast(t('备份失败：') + r.error, 'err');
   }
 });
 $('#btn-wd-restore').addEventListener('click', async () => {
   if (!(await wdSave())) return;
-  if (!confirm('从云端恢复最近一次备份？\n注意：与备份同名的本地 SKILL 将被云端版本覆盖！')) return;
-  $('#wd-status').textContent = '正在下载并恢复…';
+  if (!confirm(t('从云端恢复最近一次备份？\n注意：与备份同名的本地 SKILL 将被云端版本覆盖！'))) return;
+  $('#wd-status').textContent = t('正在下载并恢复…');
   const r = await api.invoke('sync:restore');
   if (r.ok) {
     $('#wd-status').textContent = `✓ 已恢复 ${r.name}（${r.restored} 个 SKILL → ${r.dests.length} 个目录）`;
     toast(`已从云端恢复 ${r.restored} 个 SKILL ✓`, 'ok');
-    if (r.settings && confirm('备份中包含设置（Agents / 项目 / WebDAV）。是否一并恢复？')) {
+    if (r.settings && confirm(t('备份中包含设置（Agents / 项目 / WebDAV）。是否一并恢复？'))) {
       const c = r.settings;
       const r1 = await api.invoke('config:set', { agents: c.agents || [], projects: c.projects || [] });
       if (c.webdav) await api.invoke('sync:setConfig', { webdav: c.webdav });
       if (r1.ok) {
-        toast('设置也已恢复 ✓', 'ok');
+        toast(t('设置也已恢复 ✓'), 'ok');
         state.editingAgents = JSON.parse(JSON.stringify(c.agents || []));
         state.editingProjects = JSON.parse(JSON.stringify(c.projects || []));
         renderSettings(); renderSettingsProjects(); fillWebdavInputs(state.webdav);
@@ -886,8 +886,8 @@ $('#btn-wd-restore').addEventListener('click', async () => {
     }
     scan();
   } else {
-    $('#wd-status').textContent = '✗ 恢复失败：' + r.error;
-    toast('恢复失败：' + r.error, 'err');
+    $('#wd-status').textContent = t('✗ 恢复失败：') + r.error;
+    toast(t('恢复失败：') + r.error, 'err');
   }
 });
 
@@ -897,20 +897,20 @@ function renderSettings() {
       const dirs = (a.dirs || [])
         .map((d, j) => {
           const missing = state.missing.some((m) => m.dir === expand(d));
-          return `<span class="dir-chip ${missing ? 'warn' : ''}" title="${esc(expand(d))}${missing ? '（目录不存在，安装时将自动创建）' : ''}">
+          return `<span class="dir-chip ${missing ? 'warn' : ''}" title="${esc(expand(d))}${missing ? t('（目录不存在，安装时将自动创建）') : ''}">
             ${missing ? '<span class="warn-ico">⚠</span>' : ''}${esc(d)}<span class="rm" data-i="${i}" data-j="${j}">×</span></span>`;
         })
-        .join('') || '<span class="hint">暂无目录</span>';
+        .join('') || t('<span class="hint">暂无目录</span>');
       return `<div class="agent-block" data-i="${i}">
         <div class="agent-block-head">
           <span class="dot" style="background:${esc(a.color)}"></span>
           <input class="input agent-name-input" style="width:170px;height:28px" data-i="${i}" value="${esc(a.name)}" />
           <span class="agent-id">#${esc(a.id)}</span>
           <span class="spacer"></span>
-          <button class="btn sm danger act-del-agent" data-i="${i}">移除</button>
+          <button class="btn sm danger act-del-agent" data-i="${i}">${t('移除')}</button>
         </div>
         <div class="dir-chips">${dirs}</div>
-        <div class="agent-add-dir"><button class="btn sm act-add-dir" data-i="${i}">＋ 添加 SKILL 目录</button></div>
+        <div class="agent-add-dir"><button class="btn sm act-add-dir" data-i="${i}">${t('＋ 添加 SKILL 目录')}</button></div>
       </div>`;
     })
     .join('');
@@ -949,7 +949,7 @@ $('#settings-agents').addEventListener('click', async (e) => {
 $('#btn-add-agent').addEventListener('click', () => {
   state.editingAgents.push({
     id: 'agent-' + Date.now(),
-    name: '新 Agent',
+    name: t('新 Agent'),
     color: PALETTE[state.editingAgents.length % PALETTE.length],
     dirs: [],
   });
@@ -968,20 +968,20 @@ function renderSettingsProjects() {
         <input class="input proj-name-input" style="width:210px;height:28px" data-i="${i}" value="${esc(p.name)}" />
         <span class="agent-id" title="${esc(p.dir)}">${esc(shortPath(p.dir))}</span>
         <span class="spacer"></span>
-        <button class="btn sm danger act-del-project" data-i="${i}">移除</button>
+        <button class="btn sm danger act-del-project" data-i="${i}">${t('移除')}</button>
       </div>
       <div class="hint" style="padding:0 2px">扫描其中的 .claude / .agents / .zcode / .codex / .qoder 下的 skills 目录</div>
     </div>`
     )
     .join('') ||
-    '<div class="hint" style="margin-top:6px">还没有添加项目：点击左侧栏「项目 SKILL」下方的「＋ 添加项目」即可登记，或在此处添加。</div>';
+    t('<div class="hint" style="margin-top:6px">还没有添加项目：点击左侧栏「项目 SKILL」下方的「＋ 添加项目」即可登记，或在此处添加。</div>');
 }
 
 $('#btn-add-project').addEventListener('click', async () => {
   const dir = toTilde(await api.invoke('dialog:pickFolder'));
   if (!dir) return;
   if (state.editingProjects.some((p) => p.dir.toLowerCase() === dir.toLowerCase())) {
-    toast('该项目已在列表中', 'err');
+    toast(t('该项目已在列表中'), 'err');
     return;
   }
   const name = dir.split(/[\\/]/).filter(Boolean).pop() || dir;
@@ -1004,12 +1004,12 @@ $('#settings-projects').addEventListener('click', (e) => {
 });
 
 $('#btn-reset-agents').addEventListener('click', async () => {
-  if (!confirm('恢复为默认的 Agent、目录与项目配置？（项目列表会被清空）')) return;
+  if (!confirm(t('恢复为默认的 Agent、目录与项目配置？（项目列表会被清空）'))) return;
   const r = await api.invoke('config:reset');
   if (r.ok) {
     state.agents = r.agents;
     state.projects = r.projects || [];
-    toast('已恢复默认 ✓', 'ok');
+    toast(t('已恢复默认 ✓'), 'ok');
     closeModal('modal-settings');
     scan();
   }
@@ -1024,16 +1024,16 @@ $('#btn-save-settings').addEventListener('click', async () => {
     return { id, name: a.name.trim() || id, color: a.color, dirs: (a.dirs || []).map((d) => d.trim()).filter(Boolean) };
   });
   const projects = state.editingProjects
-    .map((p) => ({ id: p.id, name: (p.name || '').trim() || '项目', dir: p.dir }))
+    .map((p) => ({ id: p.id, name: (p.name || '').trim() || t('项目'), dir: p.dir }))
     .filter((p) => p.dir);
   const r = await api.invoke('config:set', { agents, projects });
   if (r.ok) {
-    toast('设置已保存 ✓', 'ok');
+    toast(t('设置已保存 ✓'), 'ok');
     closeModal('modal-settings');
     state.filter = 'dashboard';
-    $('#main-title').textContent = '总览';
+    $('#main-title').textContent = t('总览');
     scan();
-  } else toast('保存失败', 'err');
+  } else toast(t('保存失败'), 'err');
 });
 
 // ------------------------------ 合并重复 -------------------------------------
@@ -1057,7 +1057,7 @@ function buildDupGroups() {
 
 function updateDupsButton() {
   const n = buildDupGroups().length;
-  $('#dups-label').textContent = n ? `合并重复 (${n})` : '合并重复';
+  $('#dups-label').textContent = n ? tf('合并重复 ({n})', { n }) : t('合并重复');
 }
 
 async function openDupsModal() {
@@ -1076,7 +1076,7 @@ async function openDupsModal() {
       ${g.copies
         .map((c, ci) => `
         <div class="dup-row">
-          <label class="dup-keep"><input type="radio" name="keep-${gi}" value="${ci}" ${ci === 0 ? 'checked' : ''} /> 保留</label>
+          <label class="dup-keep"><input type="radio" name="keep-${gi}" value="${ci}" ${ci === 0 ? 'checked' : ''} /> ${t('保留')}</label>
           <span class="dup-path" title="${esc(c.absPath)}">${esc(shortPath(c.parentDir))}</span>
           <span class="dup-agents">${c.agentIds
             .map((id) => {
@@ -1087,7 +1087,7 @@ async function openDupsModal() {
           <span class="dup-files">${c.fileCount} 个文件</span>
         </div>`)
         .join('')}
-      <button class="btn sm primary act-merge" data-gi="${gi}">${g.hasProject ? '合并 / 同步（项目侧覆盖为保留副本内容）' : '合并：其余替换为链接'}</button>
+      <button class="btn sm primary act-merge" data-gi="${gi}">${g.hasProject ? t('合并 / 同步（项目侧覆盖为保留副本内容）') : t('合并：其余替换为链接')}</button>
     </div>`)
     .join('');
   openModal('modal-dups');
@@ -1098,7 +1098,7 @@ async function openDupsModal() {
     g.same = results.every((r) => r.ok && r.same);
     const el = $('#dup-tag-' + gi);
     if (el) {
-      el.textContent = g.same ? '内容一致，可放心合并' : '⚠ 内容不同，请确认保留哪份';
+      el.textContent = g.same ? t('内容一致，可放心合并') : t('⚠ 内容不同，请确认保留哪份');
       el.className = 'dup-tag ' + (g.same ? 'tag-ok' : 'tag-warn');
     }
   }
@@ -1113,7 +1113,7 @@ $('#dups-list').addEventListener('click', async (e) => {
   const keep = g.copies[keepIdx];
   const others = g.copies.filter((c, i) => i !== keepIdx);
   const hasProject = others.some((c) => isProjectTarget(c.parentDir));
-  const warn = g.same === false ? '\n\n注意：各副本内容不同，未选中的全局副本将进入回收站（可找回）。' : '';
+  const warn = g.same === false ? t('\n\n注意：各副本内容不同，未选中的全局副本将进入回收站（可找回）。') : '';
   const action = hasProject
     ? `以 ${shortPath(keep.parentDir)} 中的副本为准：\n· 其余全局目录中的副本 → 移入回收站并替换为链接\n· 项目目录中的副本 → 用保留副本的内容覆盖同步（Git 仓库不建链接）${warn}`
     : `保留 ${shortPath(keep.parentDir)} 中的副本作为唯一实体，\n其余 ${others.length} 份移入回收站并替换为链接。${warn}`;
@@ -1187,9 +1187,9 @@ async function performMerge(g, keepIdx) {
 async function finishMerge(g, keepIdx, othersCount) {
   const r = await performMerge(g, keepIdx);
   if (r.failed === 0) {
-    const parts = ['1 份唯一副本'];
-    if (r.linked) parts.push(r.linked + ' 个链接');
-    if (r.synced) parts.push(r.synced + ' 个项目同步');
+    const parts = [t('1 份唯一副本')];
+    if (r.linked) parts.push(r.linked + t(' 个链接'));
+    if (r.synced) parts.push(r.synced + t(' 个项目同步'));
     toast(`已合并「${g.folder}」：${parts.join(' + ')} ✓`, 'ok');
   } else {
     toast(`「${g.folder}」合并未完成：${r.total - r.failed}/${r.total} 个副本处理成功，详见操作日志`, 'err');
@@ -1206,7 +1206,7 @@ async function applyImportedConfig(payload) {
   if (c.webdav) r2 = await api.invoke('sync:setConfig', { webdav: c.webdav });
   if (!r1.ok || !r2.ok) return false;
   state.filter = 'dashboard';
-  $('#main-title').textContent = '总览';
+  $('#main-title').textContent = t('总览');
   await scan();
   state.editingAgents = JSON.parse(JSON.stringify(state.agents));
   state.editingProjects = JSON.parse(JSON.stringify(state.projects));
@@ -1215,45 +1215,45 @@ async function applyImportedConfig(payload) {
 }
 
 $('#btn-cfg-export').addEventListener('click', async () => {
-  if (!confirm('导出的文件将包含 Agents、项目与 WebDAV 配置（含密码明文），请妥善保管。继续导出？')) return;
+  if (!confirm(t('导出的文件将包含 Agents、项目与 WebDAV 配置（含密码明文），请妥善保管。继续导出？'))) return;
   const r = await api.invoke('config:exportFile', { includePassword: true });
-  if (r.ok) toast('配置已导出 ✓ ' + r.path, 'ok');
-  else if (!r.canceled) toast('导出失败：' + (r.error || ''), 'err');
+  if (r.ok) toast(t('配置已导出 ✓ ') + r.path, 'ok');
+  else if (!r.canceled) toast(t('导出失败：') + (r.error || ''), 'err');
 });
 
 $('#btn-cfg-import').addEventListener('click', async () => {
   const r = await api.invoke('config:importFile');
   if (r.canceled) return;
-  if (!r.ok) return toast('导入失败：' + r.error, 'err');
+  if (!r.ok) return toast(t('导入失败：') + r.error, 'err');
   const c = r.payload.config;
   const w = c.webdav || {};
   if (!confirm(`将导入并覆盖当前设置：
 · ${c.agents.length} 个 Agent
 · ${(c.projects || []).length} 个项目
-· WebDAV：${w.url || '未配置'}${w.password ? '（含密码）' : ''}
+· WebDAV：${w.url || t('未配置')}${w.password ? t('（含密码）') : ''}
 
 继续？`)) return;
-  (await applyImportedConfig(r.payload)) ? toast('配置已导入 ✓', 'ok') : toast('导入失败', 'err');
+  (await applyImportedConfig(r.payload)) ? toast(t('配置已导入 ✓'), 'ok') : toast(t('导入失败'), 'err');
 });
 
 $('#btn-wd-up-cfg').addEventListener('click', async () => {
   if (!(await wdSave())) return;
-  if (!confirm('将把 Agents、项目与 WebDAV 配置（含密码）上传到云端 cc-skill-config.json（覆盖旧配置），继续？')) return;
-  $('#wd-status').textContent = '正在上传配置…';
+  if (!confirm(t('将把 Agents、项目与 WebDAV 配置（含密码）上传到云端 cc-skill-config.json（覆盖旧配置），继续？'))) return;
+  $('#wd-status').textContent = t('正在上传配置…');
   const r = await api.invoke('sync:uploadConfig', { includePassword: true });
-  $('#wd-status').textContent = r.ok ? '✓ 配置已上传到云端' : '✗ 上传失败：' + r.error;
-  toast(r.ok ? '配置已上传到云端 ✓' : '上传失败：' + r.error, r.ok ? 'ok' : 'err');
+  $('#wd-status').textContent = r.ok ? t('✓ 配置已上传到云端') : t('✗ 上传失败：') + r.error;
+  toast(r.ok ? t('配置已上传到云端 ✓') : t('上传失败：') + r.error, r.ok ? 'ok' : 'err');
 });
 
 $('#btn-wd-down-cfg').addEventListener('click', async () => {
-  if (!confirm('将从云端下载配置并覆盖本机全部设置（Agents / 项目 / WebDAV），继续？')) return;
-  $('#wd-status').textContent = '正在下载配置…';
+  if (!confirm(t('将从云端下载配置并覆盖本机全部设置（Agents / 项目 / WebDAV），继续？'))) return;
+  $('#wd-status').textContent = t('正在下载配置…');
   const r = await api.invoke('sync:downloadConfig');
   if (!r.ok) {
-    $('#wd-status').textContent = '✗ 恢复失败：' + r.error;
-    return toast('恢复失败：' + r.error, 'err');
+    $('#wd-status').textContent = t('✗ 恢复失败：') + r.error;
+    return toast(t('恢复失败：') + r.error, 'err');
   }
-  (await applyImportedConfig(r.payload)) ? ($('#wd-status').textContent = '✓ 已从云端恢复配置', toast('已从云端恢复配置 ✓', 'ok')) : toast('恢复失败', 'err');
+  (await applyImportedConfig(r.payload)) ? ($('#wd-status').textContent = t('✓ 已从云端恢复配置'), toast(t('已从云端恢复配置 ✓'), 'ok')) : toast(t('恢复失败'), 'err');
 });
 
 // ------------------------------ 顶栏 / 快捷键 --------------------------------
@@ -1272,11 +1272,21 @@ $('#btn-clear-logs').addEventListener('click', () => {
   updateLogBadge();
   renderLogs();
 });
+// 语言切换：保存偏好 → 翻译静态节点 → 重渲染动态列表
+  $('#set-lang').addEventListener('change', (e) => {
+    i18n.setLang(e.target.value);
+    i18n.apply(document);
+    renderSidebar();
+    renderGrid();
+    updateDupsButton();
+    setFilter(state.filter);
+  });
+
 // 侧栏静态导航项（总览 / 全部 SKILL）是 HTML 写死的节点，在这里统一绑定点击
 $$('#sidebar > .nav-item').forEach((el) =>
   el.addEventListener('click', () => setFilter(el.dataset.filter))
 );
-$('#btn-rescan').addEventListener('click', () => { scan(); toast('已重新扫描'); });
+$('#btn-rescan').addEventListener('click', () => { scan(); toast(t('已重新扫描')); });
 $('#btn-new').addEventListener('click', openNewModal);
 $('#btn-settings').addEventListener('click', openSettings);
 $('#btn-import').addEventListener('click', () => {
@@ -1302,6 +1312,7 @@ document.addEventListener('keydown', (e) => {
 
 // ------------------------------ 启动 -----------------------------------------
 (async () => {
+  i18n.apply(document);
   const p = await api.invoke('app:paths');
   state.HOME = p.home || '';
   state.logFile = p.logFile || '';
