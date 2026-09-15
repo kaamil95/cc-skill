@@ -361,6 +361,10 @@
     '上传到云端': 'Upload to Cloud',
     '从云端下载': 'Download from Cloud',
     'Agent 名称': 'Agent Name',
+    '正在获取云端备份信息…': 'Fetching cloud backup info…',
+    '正在下载云端备份（{size}）…': 'Downloading cloud backup ({size})…',
+    '正在下载云端备份…': 'Downloading cloud backup…',
+    '备份大小': 'Backup size',
   };
 
   let lang = localStorage.getItem('cc-skill-lang') || 'auto';

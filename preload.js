@@ -7,7 +7,7 @@ const CHANNELS = new Set([
   'skill:read', 'skill:write', 'skill:files', 'skill:copy', 'skill:trash', 'skill:create', 'skill:compare',
   'dialog:pickFolder', 'dialog:pickZip', 'import:inspect',
   'shell:openPath', 'app:paths', 'log:append',
-  'sync:getConfig', 'sync:setConfig', 'sync:test', 'sync:backup', 'sync:restorePreview', 'sync:restoreApply', 'sync:autoCheck', 'win:minimize', 'win:maximize', 'win:close',
+  'sync:getConfig', 'sync:setConfig', 'sync:test', 'sync:backup', 'sync:restoreInfo', 'sync:restorePreview', 'sync:restoreApply', 'sync:autoCheck', 'win:minimize', 'win:maximize', 'win:close',
 ]);
 
 contextBridge.exposeInMainWorld('api', {

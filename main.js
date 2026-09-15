@@ -345,9 +345,13 @@ handle('scan', () => scanAll());
 
 handle('config:get', () => ({ agents: config.agents }));
 handle('config:set', ({ agents, projects, ui }) => {
-  if (!Array.isArray(agents)) return { ok: false, reason: 'invalid' };
-  config.agents = agents;
-  if (Array.isArray(projects)) {
+  // 各字段均可选：只传 ui 时（如「保存设置」）不会误伤 Agents / 项目
+  if (agents !== undefined) {
+    if (!Array.isArray(agents)) return { ok: false, reason: 'invalid' };
+    config.agents = agents;
+  }
+  if (projects !== undefined) {
+    if (!Array.isArray(projects)) return { ok: false, reason: 'invalid' };
     config.projects = projects.filter((p) => p && p.id && p.dir);
   }
   if (ui && ['auto', 'zh', 'en'].includes(ui.lang)) config.ui = { lang: ui.lang };
@@ -709,11 +713,12 @@ async function uploadSnapshot(items) {
         });
       }
     }
-    const manifest = {
-      app: 'CC Skill',
-      manifestVersion: 1,
-      created: new Date().toISOString(),
-      settings: buildConfigPayload(true).config,
+  const manifest = {
+    app: 'CC Skill',
+    manifestVersion: 1,
+    created: new Date().toISOString(),
+    hostname: os.hostname(),
+    settings: buildConfigPayload(true).config,
       targets: [...targets.values()],
       entries: items.map((s) => ({ target: targets.get(s.parentDir).id, folder: s.folder })),
     };
@@ -818,14 +823,37 @@ handle('sync:autoCheck', () => autoBackupCheck());
 
 // 恢复：取最近一份备份 → 解压 → 按 manifest 覆盖还原到各目录
 // 恢复预览：下载最近备份并解析，返回确认弹窗所需信息（不落地）
-handle('sync:restorePreview', async () => {
-  const cfg = webdavCfg();
-  if (!cfg.url) return { ok: false, error: M('请先填写 WebDAV 配置', 'Please fill in the WebDAV config first') };
+// 找最新一份备份（PROPFIND 列目录，按文件名时间戳排序取最后一份）
+async function findLatestBackupName(cfg) {
   const res = await davRequest(cfg, 'PROPFIND', davUrl(cfg, ''), { headers: { Depth: '1' } });
   const xml = await res.text();
   const names = [...new Set(xml.match(/cc-skill-backup-[^<>]*?[.]zip/g) || [])].sort();
-  if (!names.length) return { ok: false, error: M('云端没有找到任何备份', 'No backups found on the cloud') };
-  const name = names[names.length - 1];
+  return names.length ? names[names.length - 1] : null;
+}
+
+// 恢复第一步：只列目录 + HEAD 拿大小 / 时间（秒级返回），用于下载提示与确认弹窗
+handle('sync:restoreInfo', async () => {
+  const cfg = webdavCfg();
+  if (!cfg.url) return { ok: false, error: M('请先填写 WebDAV 配置', 'Please fill in the WebDAV config first') };
+  const name = await findLatestBackupName(cfg);
+  if (!name) return { ok: false, error: M('云端没有找到任何备份', 'No backups found on the cloud') };
+  const head = await davRequest(cfg, 'HEAD', davUrl(cfg, name));
+  return {
+    ok: true,
+    name,
+    size: Number(head.headers.get('content-length')) || 0,
+    uploadedAt: head.headers.get('last-modified') || '',
+    remote: cfg.url + cfg.remotePath,
+  };
+});
+
+// 恢复第二步：下载并解压指定备份，返回确认弹窗所需信息（未点击确认前不落地任何 SKILL）
+handle('sync:restorePreview', async ({ name }) => {
+  const cfg = webdavCfg();
+  if (!cfg.url) return { ok: false, error: M('请先填写 WebDAV 配置', 'Please fill in the WebDAV config first') };
+  if (!/^cc-skill-backup-.*[.]zip$/.test(String(name || ''))) {
+    return { ok: false, error: M('备份名不合法', 'Invalid backup name') };
+  }
 
   const tmpRoot = path.join(app.getPath('temp'), 'cc-skill-restore-' + Date.now());
   fs.rmSync(tmpRoot, { recursive: true, force: true });
@@ -844,7 +872,7 @@ handle('sync:restorePreview', async () => {
     ok: true,
     name,
     tmpToken: tmpRoot,
-    hostname: os.hostname(),
+    hostname: manifest.hostname || '',
     uploadedAt: manifest.created || '',
     remote: cfg.url + cfg.remotePath,
     entries: manifest.entries.length,

@@ -1061,19 +1061,37 @@ $('#btn-wd-backup').addEventListener('click', async () => {
   }
 });
 $('#btn-wd-restore').addEventListener('click', async () => {
+  const btn = $('#btn-wd-restore');
   if (!(await wdSave())) return;
-  $('#wd-status').textContent = t('正在下载并恢复…');
-  const r = await api.invoke('sync:restorePreview', {});
-  if (!r.ok) {
-    $('#wd-status').textContent = '✗ ' + r.error;
-    return toast(r.error, 'err');
+  btn.disabled = true;
+  try {
+    $('#wd-status').textContent = t('正在获取云端备份信息…');
+    const info = await api.invoke('sync:restoreInfo', {});
+    if (!info.ok) {
+      $('#wd-status').textContent = '✗ ' + info.error;
+      return toast(info.error, 'err');
+    }
+    $('#wd-status').textContent = info.size
+      ? tf('正在下载云端备份（{size}）…', { size: fmtSize(info.size) })
+      : t('正在下载云端备份…');
+    const r = await api.invoke('sync:restorePreview', { name: info.name });
+    if (!r.ok) {
+      $('#wd-status').textContent = '✗ ' + r.error;
+      return toast(r.error, 'err');
+    }
+    state.restoreToken = r.tmpToken;
+    $('#rv-host').textContent = r.hostname || '—';
+    const tRaw = r.uploadedAt || info.uploadedAt || '';
+    const d = new Date(tRaw);
+    $('#rv-time').textContent = tRaw ? (isNaN(d) ? tRaw : d.toLocaleString()) : '—';
+    $('#rv-remote').textContent = r.remote;
+    $('#rv-size').textContent = info.size ? fmtSize(info.size) : '—';
+    $('#rv-content').textContent = tf('{n} 个 SKILL + config.json', { n: r.entries });
+    $('#wd-status').textContent = t('备份内容 = 全局 + 项目内所有实体 SKILL（链接不会上传）；密码保存在本机配置文件中，请注意磁盘安全。');
+    openModal('modal-restore');
+  } finally {
+    btn.disabled = false;
   }
-  state.restoreToken = r.tmpToken;
-  $('#rv-host').textContent = r.hostname;
-  $('#rv-time').textContent = (r.uploadedAt || '').replace('T', ' ').slice(0, 19).replace(/-/g, '/');
-  $('#rv-remote').textContent = r.remote;
-  $('#rv-content').textContent = tf('{n} 个 SKILL + config.json', { n: r.entries });
-  openModal('modal-restore');
 });
 
 $('#btn-restore-confirm').addEventListener('click', async () => {
@@ -1104,8 +1122,11 @@ function openSettings() {
 
 $('#btn-save-settings').addEventListener('click', async () => {
   if (!(await wdSave())) return;
-  const r = await api.invoke('config:set', { ui: { lang: $('#set-lang').value } });
+  const lang = $('#set-lang').value;
+  const r = await api.invoke('config:set', { ui: { lang } });
   if (r.ok) {
+    i18n.setLang(lang);
+    i18n.apply(document);
     toast(t('设置已保存 ✓'), 'ok');
     closeModal('modal-settings');
     state.filter = 'dashboard';
