@@ -74,7 +74,7 @@ function renderLogs() {
     list.innerHTML = '<li class="log-empty">' + t('暂无日志') + '</li>';
     return;
   }
-  const tag = (t) => (t === 'err' ? t('错误') : t === 'ok' ? t('成功') : t('信息'));
+  const tag = (ty) => (ty === 'err' ? t('错误') : ty === 'ok' ? t('成功') : t('信息'));
   list.innerHTML = state.logs
     .map((e) => `
     <li class="log-item ${e.type}">
@@ -361,13 +361,13 @@ function renderDashboard() {
   $('#main-hint').textContent = tf('共 {n} 个 SKILL', { n: totalListed });
   $('#grid').innerHTML = `
     <div class="stat-grid">
-      ${tiles.map((t) => `<div class="stat-tile"><div class="stat-n ${t.warn ? 'warn' : ''}">${t.n}</div><div class="stat-label">${t.label}</div></div>`).join('')}
+      ${tiles.map((tl) => `<div class="stat-tile"><div class="stat-n ${t.warn ? 'warn' : ''}">${tl.n}</div><div class="stat-label">${tl.label}</div></div>`).join('')}
     </div>
     <div class="dash-actions">
-id="dash-rescan">${t('⟳ 重新扫描')}</button>
-id="dash-dups">${t('合并重复')}</button>
-id="dash-new">${t('＋ 新建 SKILL')}</button>
-id="dash-import">${t('导入 SKILL')}</button>
+      <button class="btn" id="dash-rescan">${t('⟳ 重新扫描')}</button>
+      <button class="btn tinted" id="dash-dups">${t('合并重复')}</button>
+      <button class="btn" id="dash-new">${t('＋ 新建 SKILL')}</button>
+      <button class="btn" id="dash-import">${t('导入 SKILL')}</button>
     </div>
     <div class="dash-cols">
       <div class="agent-block">
@@ -501,7 +501,7 @@ function openDetail(s) {
   $('#panel-edit').classList.add('hidden');
   $('#panel-files').classList.add('hidden');
   $('#panel-links').classList.add('hidden');
-  $$('.tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === 'preview'));
+  $('.tab').forEach((el) => el.classList.toggle('active', el.dataset.tab === 'preview'));
   $('#detail-editor').value = t('加载中…');
   $('#detail-files').innerHTML = t('<li>加载中…</li>');
   openModal('modal-detail');
@@ -585,9 +585,9 @@ $('#detail-links').addEventListener('click', async (e) => {
 
 $$('.tab').forEach((t) =>
   t.addEventListener('click', () => {
-    $$('.tab').forEach((x) => x.classList.toggle('active', x === t));
+    $('.tab').forEach((x) => x.classList.toggle('active', x === el));
     ['preview', 'edit', 'files', 'links'].forEach((p) => $('#panel-' + p).classList.add('hidden'));
-    $('#panel-' + t.dataset.tab).classList.remove('hidden');
+    $('#panel-' + el.dataset.tab).classList.remove('hidden');
   })
 );
 
@@ -1147,7 +1147,7 @@ async function performMerge(g, keepIdx) {
       }
       continue;
     }
-    const t = await api.invoke('skill:trash', { path: c.absPath });
+    const tr = await api.invoke('skill:trash', { path: c.absPath });
     if (!t.ok) {
       failed++;
       toast(`移除旧副本失败：${shortPath(c.absPath)}${t.error ? '（' + t.error + '）' : ''}`, 'err');
