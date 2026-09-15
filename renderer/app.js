@@ -358,25 +358,26 @@ function renderGrid() {
   const total = sections.reduce((n, sec) => n + sec.items.length, 0);
   $('#main-hint').textContent = tf('共 {n} 个 SKILL', { n: total });
 
+  // 空状态同样要带出路径 / 目录管理卡：新添加的项目或 Agent 还没有 SKILL 时，仍可移除项目、添加目录
+  let body;
   if (!state.view.length) {
-    grid.innerHTML = `<div class="empty"><div class="big">${FOLDER_BIG}</div>
-      ${t('还没有扫描到任何 SKILL。<br>点击右上角「设置」检查各 Agent 的 SKILL 目录，或「新建 SKILL」「导入 SKILL」。')}</div>`;
-    return;
-  }
-  if (!total) {
-    grid.innerHTML = `<div class="empty"><div class="big">${SEARCH_BIG}</div>${
+    body = `<div class="empty"><div class="big">${FOLDER_BIG}</div>
+      ${t('还没有扫描到任何 SKILL。<br>选择左侧 Agent 可「＋ 添加 SKILL 目录」，或点击「＋ 添加项目」登记项目目录。')}</div>`;
+  } else if (!total) {
+    body = `<div class="empty"><div class="big">${SEARCH_BIG}</div>${
       q ? tf('没有匹配「{q}」的 SKILL', { q: esc(q) }) : t('当前筛选下暂无 SKILL')
     }</div>`;
-    return;
-  }
-
-  grid.innerHTML = cfgCard + sections
-    .map(
-      (sec) => `
+  } else {
+    body = sections
+      .map(
+        (sec) => `
     ${sec.title ? `<div class="section-head"><h3>${esc(sec.title)}</h3>${sec.tag ? `<span class="chip proj-chip">${esc(sec.tag)}</span>` : ''}<span class="hint">${tf('{n} 个', { n: sec.items.length })}</span></div>` : ''}
     <div class="grid">${sec.items.map(cardHTML).join('')}</div>`
-    )
-    .join('');
+      )
+      .join('');
+  }
+
+  grid.innerHTML = cfgCard + body;
 
   bindCards();
 

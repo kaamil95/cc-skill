@@ -46,7 +46,7 @@
     '个目录': ' dirs',
     '还没有添加项目，可在「设置 → 项目」中添加。': 'No projects yet — add one in Settings → Projects.',
     '暂无操作记录；安装 / 合并 / 删除的结果都会记录在「操作日志」中。': 'No activity yet; install / merge / delete results are recorded in the Activity Log.',
-    '还没有扫描到任何 SKILL。<br>点击右上角「设置」检查各 Agent 的 SKILL 目录，或「新建 SKILL」「导入 SKILL」。': 'No SKILLs found yet.<br>Open Settings to check each agent\'s skill directories, or create / import one.',
+    '还没有扫描到任何 SKILL。<br>选择左侧 Agent 可「＋ 添加 SKILL 目录」，或点击「＋ 添加项目」登记项目目录。': 'No SKILLs found yet.<br>Select an agent on the left to "+ Add skill directory", or click "＋ Add Project" to register a project directory.',
     '该 Agent 暂无 SKILL：可在其他 SKILL 上点「安装到…」安装，或「新建 SKILL」': 'No skills for this agent yet: install via "Install to…" on any skill, or create a new one',
     '点击右上角「设置」检查各 Agent 的 SKILL 目录，或「新建 SKILL」「导入 SKILL」。': 'Open Settings to check directories, or create / import skills.',
     '个 SKILL': ' skills',
