@@ -205,7 +205,7 @@
   <div class="modal-overlay hidden" id="modal-settings">
     <div class="modal modal-wide">
       <div class="modal-head">
-        <div class="modal-title" data-i18n="设置 · Agents 与 SKILL 目录">设置 · Agents 与 SKILL 目录</div>
+        <div class="modal-title" data-i18n="设置">设置</div>
         <button class="modal-close" data-close="modal-settings">×</button>
       </div>
       <div class="modal-body">
@@ -215,10 +215,6 @@
           <option value="zh">简体中文</option>
           <option value="en">English</option>
         </select>
-        <p class="hint">每个 Agent 可关联多个 SKILL 目录；同一目录关联多个 Agent 时即为共享 SKILL 库。改动后点击「保存设置」生效。</p>
-        <div id="settings-agents"></div>
-        <div class="form-label" style="margin-top:18px" data-i18n="项目">项目</div>
-        <div id="settings-projects"></div>
         <div class="form-label" style="margin-top:18px" data-i18n="WebDAV 云同步">WebDAV 云同步</div>
         <div class="agent-block" id="webdav-block">
           <div class="wd-grid">
@@ -240,26 +236,14 @@
               <option value="daily">每天</option>
               <option value="weekly">每周</option>
             </select>
-            <button class="btn sm" id="btn-wd-save" data-i18n="保存配置">保存配置</button>
+            <button class="btn sm tinted" id="btn-wd-save" data-i18n="保存配置">保存配置</button>
             <button class="btn sm" id="btn-wd-test" data-i18n="测试连接">测试连接</button>
-            <button class="btn sm primary" id="btn-wd-backup" data-i18n="立即备份">立即备份</button>
-            <button class="btn sm" id="btn-wd-restore" data-i18n="恢复最近备份…">恢复最近备份…</button>
-            <button class="btn sm" id="btn-wd-up-cfg" data-i18n-title="把 Agents / 项目 / WebDAV 配置上传为云端的 cc-skill-config.json" data-i18n="上传配置">上传配置</button>
-            <button class="btn sm" id="btn-wd-down-cfg" data-i18n-title="从云端下载配置并覆盖本机设置" data-i18n="恢复配置">恢复配置</button>
+            <button class="btn sm primary" id="btn-wd-backup" data-i18n="上传到云端">上传到云端</button>
+            <button class="btn sm" id="btn-wd-restore" data-i18n="从云端下载">从云端下载</button>
           </div>
           <div class="hint" id="wd-status" style="margin-top:8px">备份内容 = 全局 + 项目内所有实体 SKILL（链接不会上传）；密码保存在本机配置文件中，请注意磁盘安全。</div>
         </div>
-        <div class="form-label" style="margin-top:18px" data-i18n="配置管理">配置管理</div>
-        <div class="agent-block">
-          <div class="hint" style="margin-bottom:10px">把 Agents、项目、WebDAV 配置导出为 JSON 文件随身携带；或通过 WebDAV 在多台设备间同步配置。</div>
-          <div class="wd-actions">
-            <button class="btn sm" id="btn-cfg-export" data-i18n="导出配置到文件">导出配置到文件</button>
-            <button class="btn sm" id="btn-cfg-import" data-i18n="从文件导入配置">从文件导入配置</button>
-          </div>
-        </div>
         <div class="settings-actions">
-          <button class="btn" id="btn-add-project" data-i18n="＋ 添加项目">＋ 添加项目</button>
-          <button class="btn" id="btn-add-agent" data-i18n="＋ 添加自定义 Agent">＋ 添加自定义 Agent</button>
           <button class="btn" id="btn-reset-agents" data-i18n="恢复默认">恢复默认</button>
         </div>
       </div>
@@ -283,6 +267,45 @@
       </div>
       <div class="modal-foot">
         <button class="btn" data-close="modal-dups" data-i18n="关闭">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 从云端恢复确认弹窗 -->
+  <div class="modal-overlay hidden" id="modal-restore">
+    <div class="modal" style="width:470px">
+      <div class="modal-body" style="padding:22px 24px">
+        <div class="restore-title"><span class="restore-ico">⚠</span><span data-i18n="从云端恢复">从云端恢复</span></div>
+        <div class="restore-grid">
+          <span class="rg-label" data-i18n="上传设备">上传设备</span><span class="rg-val mono" id="rv-host"></span>
+          <span class="rg-label" data-i18n="上传时间">上传时间</span><span class="rg-val mono" id="rv-time"></span>
+          <span class="rg-label" data-i18n="远程路径">远程路径</span><span class="rg-val mono" id="rv-remote"></span>
+          <span class="rg-label" data-i18n="包含内容">包含内容</span><span class="rg-val" id="rv-content"></span>
+        </div>
+        <div class="restore-warn" data-i18n="恢复将覆盖本地所有数据和技能配置">恢复将覆盖本地所有数据和技能配置</div>
+      </div>
+      <div class="modal-foot" style="justify-content:flex-end;gap:10px">
+        <button class="btn" data-close="modal-restore" data-i18n="取消">取消</button>
+        <button class="btn danger-solid" id="btn-restore-confirm" data-i18n="确认恢复">确认恢复</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 添加 Agent 弹窗 -->
+  <div class="modal-overlay hidden" id="modal-add-agent">
+    <div class="modal" style="width:420px">
+      <div class="modal-head">
+        <div class="modal-title" data-i18n="添加自定义 Agent">添加自定义 Agent</div>
+        <button class="modal-close" data-close="modal-add-agent">×</button>
+      </div>
+      <div class="modal-body">
+        <label class="form-label" data-i18n="Agent 名称">Agent 名称</label>
+        <input id="new-agent-name" class="input" data-i18n-ph="如 MyAgent" />
+        <p class="hint" data-i18n="技能目录默认为 ~/.<名称>/skills，首次安装时自动创建；也可稍后在详情中添加目录。">技能目录默认为 ~/.<名称>/skills，首次安装时自动创建；也可稍后在详情中添加目录。</p>
+      </div>
+      <div class="modal-foot">
+        <button class="btn" data-close="modal-add-agent" data-i18n="取消">取消</button>
+        <button class="btn primary" id="btn-add-agent-go" data-i18n="创建">创建</button>
       </div>
     </div>
   </div>

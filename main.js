@@ -19,24 +19,20 @@ const DEFAULT_AGENTS = [
 let win = null;
 let config = null;
 
-// 固定配置目录为 %APPDATA%\cc-skill（不随 productName 变化），并从历史目录迁移
-const CONFIG_DIR = process.env.CC_SKILL_DATA_DIR
-  || path.join(
-    process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'),
-    'cc-skill'
-  );
+// 配置存储在 exe / 日志同级目录（便携版配置随目录一起带走）；测试隔离：CC_SKILL_DATA_DIR 可覆盖
+// 首次运行时从 %APPDATA% 下的历史目录迁移 config.json
+const DATA_DIR = process.env.CC_SKILL_DATA_DIR || appDir();
 try {
-  if (!fs.existsSync(path.join(CONFIG_DIR, 'config.json'))) {
-    for (const legacy of ['CC Skill', 'skillharbor', 'skillhub']) {
+  if (!fs.existsSync(path.join(DATA_DIR, 'config.json'))) {
+    for (const legacy of ['cc-skill', 'CC Skill', 'skillharbor', 'skillhub']) {
       const oldCfg = path.join(process.env.APPDATA || '', legacy, 'config.json');
       if (fs.existsSync(oldCfg)) {
-        fs.mkdirSync(CONFIG_DIR, { recursive: true });
-        fs.copyFileSync(oldCfg, path.join(CONFIG_DIR, 'config.json'));
+        fs.mkdirSync(DATA_DIR, { recursive: true });
+        fs.copyFileSync(oldCfg, path.join(DATA_DIR, 'config.json'));
         break;
       }
     }
   }
-  app.setPath('userData', CONFIG_DIR);
 } catch (_) { /* 迁移失败按默认路径运行 */ }
 
 const expand = (p) => (p && p.startsWith('~') ? path.join(os.homedir(), p.slice(1)) : p);
@@ -71,13 +67,13 @@ function normalizeConfigInPlace() {
   }
 }
 function configPath() {
-  return path.join(app.getPath('userData'), 'config.json');
+  return path.join(DATA_DIR, 'config.json');
 }
 function saveConfig() {
   fs.mkdirSync(path.dirname(configPath()), { recursive: true });
   try {
     if (fs.existsSync(configPath())) {
-      fs.copyFileSync(configPath(), path.join(CONFIG_DIR, 'config.backup.json'));
+      fs.copyFileSync(configPath(), path.join(path.dirname(configPath()), 'config.backup.json'));
     }
   } catch (_) { /* 备份失败不阻塞保存 */ }
   fs.writeFileSync(configPath(), JSON.stringify(config, null, 2), 'utf8');
@@ -88,11 +84,12 @@ function loadConfig() {
     if (Array.isArray(raw.agents)) {
       config = raw;
       if (!Array.isArray(config.projects)) config.projects = [];
+      if (!config.ui || !['auto', 'zh', 'en'].includes(config.ui.lang)) config.ui = { lang: 'auto' };
       normalizeConfigInPlace();
       return;
     }
   } catch (_) { /* 首次运行或损坏则重置 */ }
-  config = { agents: JSON.parse(JSON.stringify(DEFAULT_AGENTS)), projects: [] };
+  config = { agents: JSON.parse(JSON.stringify(DEFAULT_AGENTS)), projects: [], ui: { lang: 'auto' } };
   saveConfig();
 }
 
@@ -300,7 +297,7 @@ function scanAll() {
     if (!s.linked) s.linkCount = linkCounts.get(s.absPath.toLowerCase()) || 0;
   }
   skills.sort((a, b) => a.name.localeCompare(b.name, 'zh'));
-  return { skills, agents: config.agents, projects: config.projects, webdav: webdavCfg(), missingDirs };
+  return { skills, agents: config.agents, projects: config.projects, ui: config.ui || { lang: 'auto' }, webdav: webdavCfg(), missingDirs };
 }
 
 // Agent 没有配置目录时，给它一个默认目录并写回配置
@@ -347,15 +344,16 @@ const handle = (ch, fn) =>
 handle('scan', () => scanAll());
 
 handle('config:get', () => ({ agents: config.agents }));
-handle('config:set', ({ agents, projects }) => {
+handle('config:set', ({ agents, projects, ui }) => {
   if (!Array.isArray(agents)) return { ok: false, reason: 'invalid' };
   config.agents = agents;
   if (Array.isArray(projects)) {
     config.projects = projects.filter((p) => p && p.id && p.dir);
   }
+  if (ui && ['auto', 'zh', 'en'].includes(ui.lang)) config.ui = { lang: ui.lang };
   normalizeConfigInPlace();
   saveConfig();
-  return { ok: true, agents: config.agents, projects: config.projects };
+  return { ok: true, agents: config.agents, projects: config.projects, ui: config.ui };
 });
 handle('config:reset', () => {
   config.agents = JSON.parse(JSON.stringify(DEFAULT_AGENTS));
@@ -570,6 +568,8 @@ async function unpackZip(zipPath, destDir) {
 // 参考 clash / cc-switch 的模式：用户自填 WebDAV 配置，支持连接测试、
 // 全量快照备份（zip：manifest + 各目录 SKILL）、恢复最近备份。
 function ps(s) { return String(s).replace(/'/g, "''"); }
+const UI_EN = !app.getLocale().toLowerCase().startsWith('zh');
+const M = (zh, en) => (UI_EN ? en : zh);
 
 function webdavCfg() {
   const c = config.webdav || {};
@@ -646,7 +646,7 @@ handle('sync:setConfig', ({ webdav }) => {
 
 handle('sync:test', async () => {
   const cfg = webdavCfg();
-  if (!cfg.url) return { ok: false, error: '请先填写服务器地址' };
+  if (!cfg.url) return { ok: false, error: M('请先填写服务器地址', 'Please fill in the server URL first') };
   try {
     try {
       await davRequest(cfg, 'PROPFIND', davUrl(cfg, ''), { headers: { Depth: '0' } });
@@ -681,7 +681,7 @@ handle('sync:backup', async () => {
   if (!cfg.url) return { ok: false, error: '请先填写 WebDAV 配置' };
   const res = scanAll();
   const items = res.skills.filter((s) => s.type === 'folder' && !s.linked && !s.dangling);
-  if (!items.length) return { ok: false, error: '没有可备份的 SKILL' };
+  if (!items.length) return { ok: false, error: M('没有可备份的 SKILL', 'No skills to back up') };
   const up = await uploadSnapshot(items);
   if (!up.ok) return up;
   config.webdav.lastBackupAt = Date.now();
@@ -724,6 +724,8 @@ async function uploadSnapshot(items) {
       count++;
     }
     fs.writeFileSync(path.join(tmpRoot, 'manifest.json'), JSON.stringify(manifest, null, 2), 'utf8');
+    // 设置文件随备份一同上传（ Agents / 项目 / WebDAV / 界面语言 ）
+    fs.writeFileSync(path.join(tmpRoot, 'config.json'), JSON.stringify({ ui: config.ui || { lang: 'auto' }, agents: config.agents, projects: config.projects, webdav: webdavCfg(), exportedAt: manifest.created }, null, 2), 'utf8');
 
     const zipPath = tmpRoot + '.zip';
     fs.rmSync(zipPath, { force: true });
@@ -815,13 +817,14 @@ async function autoBackupCheck() {
 handle('sync:autoCheck', () => autoBackupCheck());
 
 // 恢复：取最近一份备份 → 解压 → 按 manifest 覆盖还原到各目录
-handle('sync:restore', async () => {
+// 恢复预览：下载最近备份并解析，返回确认弹窗所需信息（不落地）
+handle('sync:restorePreview', async () => {
   const cfg = webdavCfg();
-  if (!cfg.url) return { ok: false, error: '请先填写 WebDAV 配置' };
+  if (!cfg.url) return { ok: false, error: M('请先填写 WebDAV 配置', 'Please fill in the WebDAV config first') };
   const res = await davRequest(cfg, 'PROPFIND', davUrl(cfg, ''), { headers: { Depth: '1' } });
   const xml = await res.text();
-  const names = [...new Set(xml.match(/cc-skill-backup-[^<>]*?\.zip/g) || [])].sort();
-  if (!names.length) return { ok: false, error: '云端没有找到任何备份' };
+  const names = [...new Set(xml.match(/cc-skill-backup-[^<>]*?[.]zip/g) || [])].sort();
+  if (!names.length) return { ok: false, error: M('云端没有找到任何备份', 'No backups found on the cloud') };
   const name = names[names.length - 1];
 
   const tmpRoot = path.join(app.getPath('temp'), 'cc-skill-restore-' + Date.now());
@@ -829,14 +832,33 @@ handle('sync:restore', async () => {
   fs.mkdirSync(tmpRoot, { recursive: true });
   const dl = await davRequest(cfg, 'GET', davUrl(cfg, name));
   fs.writeFileSync(tmpRoot + '.zip', Buffer.from(await dl.arrayBuffer()));
-  await unpackZip(tmpRoot + ".zip", tmpRoot);
+  await unpackZip(tmpRoot + '.zip', tmpRoot);
 
   const manifest = JSON.parse(fs.readFileSync(path.join(tmpRoot, 'manifest.json'), 'utf8'));
   if (!['CC Skill', 'SkillHarbor'].includes(manifest.app)) {
     fs.rmSync(tmpRoot, { recursive: true, force: true });
     fs.rmSync(tmpRoot + '.zip', { force: true });
-    return { ok: false, error: 'manifest 校验失败，不是 CC Skill 的备份' };
+    return { ok: false, error: M('manifest 校验失败，不是 CC Skill 的备份', 'Manifest validation failed — not a CC Skill backup') };
   }
+  return {
+    ok: true,
+    name,
+    tmpToken: tmpRoot,
+    hostname: os.hostname(),
+    uploadedAt: manifest.created || '',
+    remote: cfg.url + cfg.remotePath,
+    entries: manifest.entries.length,
+    hasConfig: fs.existsSync(path.join(tmpRoot, 'config.json')),
+  };
+});
+
+// 恢复应用：使用预览阶段解压的快照，覆盖还原 SKILL 与配置
+handle('sync:restoreApply', async ({ tmpToken }) => {
+  const tmpRoot = String(tmpToken || '');
+  if (!tmpRoot.startsWith(path.join(os.tmpdir(), 'cc-skill-restore-')) || !fs.existsSync(path.join(tmpRoot, 'manifest.json'))) {
+    return { ok: false, error: M('恢复会话已失效，请重新从云端下载', 'Restore session expired — download from the cloud again') };
+  }
+  const manifest = JSON.parse(fs.readFileSync(path.join(tmpRoot, 'manifest.json'), 'utf8'));
   const targetById = new Map(manifest.targets.map((t) => [t.id, t]));
   let restored = 0;
   const dests = new Set();
@@ -852,11 +874,25 @@ handle('sync:restore', async () => {
     dests.add(t.destDir);
     restored++;
   }
+  // 恢复设置文件（ Agents / 项目 / WebDAV / 界面语言 ）
+  let appliedConfig = false;
+  const cfgFile = path.join(tmpRoot, 'config.json');
+  if (fs.existsSync(cfgFile)) {
+    try {
+      const c = JSON.parse(fs.readFileSync(cfgFile, 'utf8'));
+      if (Array.isArray(c.agents)) config.agents = c.agents;
+      if (Array.isArray(c.projects)) config.projects = c.projects.filter((p) => p && p.id && p.dir);
+      if (c.ui && ['auto', 'zh', 'en'].includes(c.ui.lang)) config.ui = { lang: c.ui.lang };
+      if (c.webdav) config.webdav = { ...(config.webdav || {}), ...c.webdav, lastBackupAt: Date.now(), lastBackupHash: '' };
+      normalizeConfigInPlace();
+      saveConfig();
+      appliedConfig = true;
+    } catch (_) { /* 配置恢复失败不影响 SKILL */ }
+  }
   fs.rmSync(tmpRoot, { recursive: true, force: true });
   fs.rmSync(tmpRoot + '.zip', { force: true });
-  return { ok: true, name, restored, dests: [...dests], settings: manifest.settings || null };
+  return { ok: true, name, restored, dests: [...dests], appliedConfig };
 });
-
 // --------------------------- 配置导入 / 导出 ---------------------------------
 function buildConfigPayload(includePassword) {
   const w = { ...(config.webdav || {}) };
@@ -868,79 +904,18 @@ function buildConfigPayload(includePassword) {
     kind: 'config',
     version: 1,
     exportedAt: new Date().toISOString(),
-    config: { agents: config.agents, projects: config.projects, webdav: w },
+    config: { agents: config.agents, projects: config.projects, webdav: w, ui: config.ui || { lang: 'auto' } },
   };
 }
 
-handle('config:payload', ({ includePassword = true }) => ({ ok: true, payload: buildConfigPayload(includePassword) }));
-handle('config:exportFile', async ({ includePassword = true }) => {
-  const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, "");
-  const r = await dialog.showSaveDialog(win, {
-    defaultPath: 'cc-skill-config-' + stamp + '.json',
-    filters: [{ name: 'JSON', extensions: ['json'] }],
-  });
-  if (r.canceled || !r.filePath) return { ok: false, canceled: true };
-  fs.writeFileSync(r.filePath, JSON.stringify(buildConfigPayload(includePassword), null, 2), "utf8");
-  return { ok: true, path: r.filePath };
-});
 
-handle('config:importFile', async () => {
-  const r = await dialog.showOpenDialog(win, {
-    filters: [{ name: 'JSON', extensions: ['json'] }],
-    properties: ['openFile'],
-  });
-  if (r.canceled || !r.filePaths.length) return { ok: false, canceled: true };
-  let payload;
-  try {
-    payload = JSON.parse(fs.readFileSync(r.filePaths[0], "utf8"));
-  } catch (err) {
-    return { ok: false, error: "文件不是有效的 JSON：" + err.message };
-  }
-  if (payload.kind !== "config" || !Array.isArray(payload.config && payload.config.agents)) {
-    return { ok: false, error: "不是有效的 CC Skill 配置文件" };
-  }
-  return { ok: true, payload };
-});
-
-// WebDAV 设置同步：配置（Agents/项目/WebDAV，含密码）单独上传 / 下载
-handle('sync:uploadConfig', async ({ includePassword = true }) => {
-  const cfg = webdavCfg();
-  if (!cfg.url) return { ok: false, error: "请先填写并保存 WebDAV 配置" };
-  const payload = buildConfigPayload(includePassword);
-  try {
-    try { await davMkcolDeep(cfg, davUrl(cfg, "")); } catch (_) { /* PUT 阶段再验证 */ }
-    const body = new Uint8Array(Buffer.from(JSON.stringify(payload, null, 2), "utf8"));
-    await davRequest(cfg, 'PUT', davUrl(cfg, 'cc-skill-config.json'), { body, headers: { 'Content-Type': 'application/json' } });
-    return { ok: true, name: "cc-skill-config.json" };
-  } catch (err) {
-    const msg = String(err.message || err);
-    if (/HTTP (404|409)/.test(msg)) return { ok: false, error: "远程目录不存在——请到网盘网页端手动创建后重试" };
-    if (/HTTP 401/.test(msg)) return { ok: false, error: "认证失败：请检查用户名 / 密码" };
-    return { ok: false, error: msg };
-  }
-});
-
-handle('sync:downloadConfig', async () => {
-  const cfg = webdavCfg();
-  if (!cfg.url) return { ok: false, error: "请先填写 WebDAV 配置" };
-  try {
-    const res = await davRequest(cfg, "GET", davUrl(cfg, "cc-skill-config.json"));
-    const payload = JSON.parse(Buffer.from(await res.arrayBuffer()).toString("utf8"));
-    if (payload.kind !== "config") return { ok: false, error: "云端文件不是有效的 CC Skill 配置" };
-    return { ok: true, payload };
-  } catch (err) {
-    const msg = String(err.message || err);
-    if (/HTTP 404/.test(msg)) return { ok: false, error: "云端还没有配置文件（先在任意一台机器上传配置）" };
-    if (/HTTP 401/.test(msg)) return { ok: false, error: "认证失败：请检查用户名 / 密码" };
-    return { ok: false, error: msg };
-  }
-});
 
 handle('shell:openPath', ({ path: p }) => shell.openPath(expand(p)));
 handle('app:paths', () => ({
   userData: app.getPath('userData'),
   home: os.homedir(),
   logFile: path.join(appDir(), 'cc-skill.log'),
+  ui: config.ui || { lang: 'auto' },
 }));
 
 // ------------------------------ 窗口控制（自绘标题栏） ----------------------
@@ -976,6 +951,10 @@ function createWindow() {
   });
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
 }
+
+// userData（Chromium 缓存等）与单实例锁都挂在配置目录下：便携版不留痕迹于 %APPDATA%，
+// 且 CC_SKILL_DATA_DIR 隔离的测试实例不会和正式实例抢锁
+app.setPath('userData', path.join(DATA_DIR, 'user-data'));
 
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {

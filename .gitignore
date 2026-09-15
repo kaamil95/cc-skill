@@ -8,6 +8,10 @@ dist2/
 # Local logs
 *.log
 
+# 本地配置（开发模式写在项目根目录，正式版在 exe 同级目录）
+/config.json
+/config.backup.json
+
 # OS
 .DS_Store
 Thumbs.db

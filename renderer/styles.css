@@ -540,6 +540,15 @@ select.input {
 .log-type.err { color: #c22619 !important; background: rgba(255, 59, 48, 0.12) !important; }
 .log-type.ok { color: #1d7a35 !important; background: rgba(52, 199, 89, 0.14) !important; }
 
+.restore-title { display: flex; align-items: center; gap: 8px; font-size: 15.5px; font-weight: 600; margin-bottom: 14px; }
+.restore-ico { color: var(--orange); font-size: 18px; }
+.restore-grid { display: grid; grid-template-columns: 76px 1fr; gap: 8px 12px; font-size: 13px; margin-bottom: 12px; }
+.rg-label { color: var(--text-2); }
+.rg-val.mono { font-family: var(--mono); font-size: 12px; color: var(--text); word-break: break-all; }
+.restore-warn { color: #c22619; font-size: 12.5px; font-weight: 500; margin-bottom: 4px; }
+.btn.danger-solid { background: #e5484d; border-color: #e5484d; color: #fff; font-weight: 600; }
+.btn.danger-solid:hover { background: #ec5c5c; }
+
 .wd-grid { display: grid; grid-template-columns: 76px 1fr; gap: 9px 10px; align-items: center; }
 .wd-grid label { font-size: 12px; color: var(--text-2); }
 .wd-actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
