@@ -1,0 +1,7 @@
+# 仓库内统一存 LF：Windows 开发机与 CI（windows-latest）不会因换行符产生假改动，
+# 也让 prettier --check 在两边结果一致
+* text=auto eol=lf
+
+# 二进制资源不做换行符转换
+*.png binary
+*.ico binary

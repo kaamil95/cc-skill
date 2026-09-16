@@ -54,17 +54,31 @@ git clone https://github.com/kaamil95/cc-skill.git
 cd cc-skill
 npm install           # 国内网络：ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ 可加速
 npm start             # 开发运行
-npm run dist          # 打包便携版 exe（dist/CC Skill <version>.exe）
+npm run dist          # 打包 Windows 便携版 exe（dist/CC Skill <version>.exe）
+npm run dist:mac      # 打包 macOS dmg（必须在 macOS 上执行，见下）
 ```
 
-环境要求：Windows 10+（链接安装依赖 NTFS）、Node.js 18+。
+环境要求：Windows 10+（链接安装依赖 NTFS）或 macOS 12+、Node.js 18+。
 
 > 每次发版都会在 [Releases](../../releases) 附上免安装便携版。
+
+### 打包 macOS 版
+
+macOS 的 `.app` / `.dmg` **只能在 macOS 上构建**——electron-builder 无法从 Windows 交叉编译，签名与公证更是必须在本机。两条路：
+
+- **有 Mac**：`npm ci && npm run dist:mac`，产物在 `dist/*.dmg`（同时出 Apple Silicon 与 Intel 两个架构）
+- **没有 Mac**：在 GitHub 上手动触发 **Actions → Build macOS → Run workflow**，跑完在 Artifacts 里下载
+
+未签名的包首次打开会被 Gatekeeper 拦住，右键 →「打开」即可放行（或 `xattr -cr "/Applications/CC Skill.app"`）。
+要分发给别人，需要 Apple 开发者账号做签名 + 公证，否则对方每次都得手动放行。
+
+macOS 上配置与日志存放在 `~/Library/Application Support/CC Skill/`——`.app` 是只读的代码签名包，
+写进去会破坏签名，所以不沿用 Windows 的便携语义（Windows 便携版仍是配置与 exe 同级，整个目录拷走即可）。
 
 ## 实现原理
 
 - **副本安装**：普通递归复制到目标 Agent 目录。
-- **链接安装**：在目标 Agent 目录内创建 NTFS **目录联接**（`fs.symlinkSync(target, dest, 'junction')`），指向唯一副本。无需管理员权限，要求同一磁盘。删除链接绝不会动唯一副本；删除唯一副本会警告有多少链接将失效；源丢失后的失效链接会被标记、可安全清理。
+- **链接安装**：在目标 Agent 目录内创建指向唯一副本的**目录链接**——Windows 用 NTFS 目录联接（`junction`，无需管理员权限、要求同一磁盘），macOS 用符号链接（`symlink`）。删除链接绝不会动唯一副本；删除唯一副本会警告有多少链接将失效；源丢失后的失效链接会被标记、可安全清理。
 - **项目级管理**：扫描 `<project>/.claude|.agents|.zcode|.codex|.qoder/skills`。项目内安装强制副本。
 - **WebDAV 备份**：把 `manifest.json` + 全部实体 SKILL 打成 zip PUT 到你的服务器；恢复时下载最近一份快照，按记录覆盖还原到对应目录。
 

@@ -2,14 +2,20 @@
 
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
-const esc = (s) =>
-  String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
 const svgIcon = (paths, size = 14, sw = 1.7) =>
   `<svg class="i" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round">${paths}</svg>`;
-const FOLDER_SVG = svgIcon('<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>', 15);
+const FOLDER_SVG = svgIcon(
+  '<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>',
+  15
+);
 const FILE_SVG = svgIcon('<path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><path d="M14 2v6h6"/>', 15);
-const FOLDER_BIG = svgIcon('<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>', 46, 1.2);
+const FOLDER_BIG = svgIcon(
+  '<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>',
+  46,
+  1.2
+);
 const SEARCH_BIG = svgIcon('<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>', 46, 1.2);
 const CHECK_BIG = svgIcon('<circle cx="12" cy="12" r="9"/><path d="m8.5 12.5 2.5 2.5 5-5.5"/>', 40, 1.4);
 
@@ -27,7 +33,7 @@ const state = {
   importSrc: null,
   logs: [],
   unreadErrors: 0,
-  restoreToken: null,
+  restoreName: null,
   dupGroups: [],
   editingAgents: null,
   editingProjects: null,
@@ -44,8 +50,16 @@ const toTilde = (p) => {
 };
 const fmtSize = (n) => (n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(1) + ' KB' : (n / 1048576).toFixed(1) + ' MB');
 const isProjectTarget = (v) => {
-  const norm = String(v || '').replace(/[\\/]+/g, '/').toLowerCase();
-  return state.projects.some((p) => norm.startsWith(String(p.dir).replace(/[\\/]+/g, '/').toLowerCase()));
+  const norm = String(v || '')
+    .replace(/[\\/]+/g, '/')
+    .toLowerCase();
+  return state.projects.some((p) =>
+    norm.startsWith(
+      String(p.dir)
+        .replace(/[\\/]+/g, '/')
+        .toLowerCase()
+    )
+  );
 };
 const agentById = (id) => state.agents.find((a) => a.id === id);
 
@@ -54,7 +68,10 @@ function log(msg, type = '') {
   state.logs.unshift({ time: new Date(), type, msg });
   if (state.logs.length > 500) state.logs.pop();
   if (!$('#modal-logs').classList.contains('hidden')) renderLogs();
-  else if (type === 'err') { state.unreadErrors++; updateLogBadge(); }
+  else if (type === 'err') {
+    state.unreadErrors++;
+    updateLogBadge();
+  }
   api.invoke('log:append', { type, msg }).catch(() => {});
 }
 
@@ -65,7 +82,10 @@ function toast(msg, type = '') {
   el.textContent = msg;
   if (type === 'err') {
     el.title = t('点击查看操作日志');
-    el.addEventListener('click', () => { el.remove(); openLogs(); });
+    el.addEventListener('click', () => {
+      el.remove();
+      openLogs();
+    });
   }
   $('#toasts').appendChild(el);
   setTimeout(() => el.remove(), type === 'err' ? 10000 : 2800);
@@ -79,12 +99,14 @@ function renderLogs() {
   }
   const tag = (ty) => (ty === 'err' ? t('错误') : ty === 'ok' ? t('成功') : t('信息'));
   list.innerHTML = state.logs
-    .map((e) => `
+    .map(
+      (e) => `
     <li class="log-item ${e.type}">
       <span class="log-time">${e.time.toLocaleTimeString('zh-CN', { hour12: false })}</span>
       <span class="log-type">${tag(e.type)}</span>
       <span class="log-msg">${esc(e.msg)}</span>
-    </li>`)
+    </li>`
+    )
     .join('');
 }
 function updateLogBadge() {
@@ -112,9 +134,45 @@ window.addEventListener('unhandledrejection', (e) => {
 // ------------------------------ 弹窗 ----------------------------------------
 const openModal = (id) => $('#' + id).classList.remove('hidden');
 const closeModal = (id) => $('#' + id).classList.add('hidden');
+
+// 统一风格的确认弹窗（替代原生 confirm，样式与「从云端恢复」一致）。
+// 文案由调用方传入**已翻译**的成品字符串（调用点用的是 tf/t），这里不再过 t()。
+let confirmSettle = null;
+function confirmModal({ title, message, confirmLabel = '确定', danger = true }) {
+  $('#cf-title').textContent = title;
+  $('#cf-msg').textContent = message;
+  // 非破坏性操作不放警告图标；用 display 而不是 visibility，免得空出图标的位置把标题推右
+  $('#cf-ico').style.display = danger ? '' : 'none';
+  const ok = $('#cf-ok');
+  ok.textContent = confirmLabel;
+  ok.classList.toggle('danger-solid', danger);
+  ok.classList.toggle('primary', !danger);
+  openModal('modal-confirm');
+  ok.focus();
+  return new Promise((resolve) => {
+    confirmSettle = resolve;
+  });
+}
+function settleConfirm(ok) {
+  closeModal('modal-confirm');
+  const resolve = confirmSettle;
+  confirmSettle = null;
+  if (resolve) resolve(ok);
+}
+$('#cf-ok').addEventListener('click', () => settleConfirm(true));
+$('#cf-cancel').addEventListener('click', () => settleConfirm(false));
+// 点遮罩空白处 / 按 Esc 都算取消
+$('#modal-confirm').addEventListener('mousedown', (e) => {
+  if (e.target === e.currentTarget) settleConfirm(false);
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !$('#modal-confirm').classList.contains('hidden')) settleConfirm(false);
+});
 $$('[data-close]').forEach((b) => b.addEventListener('click', () => closeModal(b.dataset.close)));
 $$('.modal-overlay').forEach((ov) =>
-  ov.addEventListener('mousedown', (e) => { if (e.target === ov) ov.classList.add('hidden'); })
+  ov.addEventListener('mousedown', (e) => {
+    if (e.target === ov) ov.classList.add('hidden');
+  })
 );
 
 // ------------------------------ 扫描 / 渲染 ---------------------------------
@@ -155,16 +213,18 @@ function buildDisplayList() {
 
 function renderSidebar() {
   const nav = $('#agent-nav');
-  nav.innerHTML = state.agents
-    .map((a) => {
-      const n = state.view.filter((s) => !s.project && s.allAgentIds.includes(a.id)).length;
-      return `<div class="nav-item ${state.filter === a.id ? 'active' : ''}" data-filter="${esc(a.id)}">
+  nav.innerHTML =
+    state.agents
+      .map((a) => {
+        const n = state.view.filter((s) => !s.project && s.allAgentIds.includes(a.id)).length;
+        return `<div class="nav-item ${state.filter === a.id ? 'active' : ''}" data-filter="${esc(a.id)}">
         <span class="nav-dot" style="background:${esc(a.color)}"></span>
         <span class="nav-name">${esc(a.name)}</span>
         <span class="nav-count">${n}</span>
       </div>`;
-    })
-    .join('') + `<div class="nav-item nav-add" id="nav-add-agent" title="${esc(t('添加自定义 Agent'))}">
+      })
+      .join('') +
+    `<div class="nav-item nav-add" id="nav-add-agent" title="${esc(t('添加自定义 Agent'))}">
         <span class="nav-icon">＋</span>
         <span class="nav-name">${t('添加 Agent')}</span>
       </div>`;
@@ -187,20 +247,19 @@ function renderProjectNav() {
       <span class="nav-icon">＋</span>
       <span class="nav-name">${t('添加项目')}</span>
     </div>`;
-  el.innerHTML = state.projects
-    .map((p) => {
-      const n = state.view.filter((s) => s.project && s.project.id === p.id).length;
-      const key = 'project:' + p.id;
-      return `<div class="nav-item ${state.filter === key ? 'active' : ''}" data-filter="${esc(key)}" title="${esc(p.dir)}">
+  el.innerHTML =
+    state.projects
+      .map((p) => {
+        const n = state.view.filter((s) => s.project && s.project.id === p.id).length;
+        const key = 'project:' + p.id;
+        return `<div class="nav-item ${state.filter === key ? 'active' : ''}" data-filter="${esc(key)}" title="${esc(p.dir)}">
         <span class="nav-icon">${FOLDER_SVG}</span>
         <span class="nav-name">${esc(p.name)}</span>
         <span class="nav-count">${n}</span>
       </div>`;
-    })
-    .join('') + addProjectBtn;
-  $$('#project-nav .nav-item:not(.nav-add)').forEach((el2) =>
-    el2.addEventListener('click', () => setFilter(el2.dataset.filter))
-  );
+      })
+      .join('') + addProjectBtn;
+  $$('#project-nav .nav-item:not(.nav-add)').forEach((el2) => el2.addEventListener('click', () => setFilter(el2.dataset.filter)));
   const add = $('#nav-add-project');
   if (add) add.addEventListener('click', addProjectFlow);
 }
@@ -213,7 +272,11 @@ async function addProjectFlow() {
     toast(t('该项目已在列表中'), 'err');
     return;
   }
-  const name = dir.split(/[\\/]+/).filter(Boolean).pop() || dir;
+  const name =
+    dir
+      .split(/[\\/]+/)
+      .filter(Boolean)
+      .pop() || dir;
   const projects = state.projects.concat([{ id: 'proj-' + Date.now(), name, dir }]);
   const r = await api.invoke('config:set', { agents: state.agents, projects });
   if (!r.ok) {
@@ -238,7 +301,11 @@ $('#btn-add-agent-go').addEventListener('click', async () => {
   const name = $('#new-agent-name').value.trim();
   if (!name) return toast(t('请填写 Agent 名称'), 'err');
   if (state.agents.some((a) => a.name === name)) return toast(t('已存在同名 Agent'), 'err');
-  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'agent';
+  const slug =
+    name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '') || 'agent';
   let id = slug;
   while (state.agents.some((a) => a.id === id)) id += '-2';
   const colors = ['#e07a4f', '#19b39a', '#f0a35c', '#4f8ef7', '#8b5cf6', '#e2556e', '#38bdf8'];
@@ -288,7 +355,7 @@ function cardHTML(s) {
         : '';
   const dirName = s.type === 'file' ? s.folder + '.md' : s.folder;
   const pathText = s.dangling ? t('源已丢失') : s.linked ? '→ ' + shortPath(s.linkTarget || s.absPath) : dirName;
-  const pathTip = s.linked ? (s.linkTarget || s.absPath) : s.absPath;
+  const pathTip = s.linked ? s.linkTarget || s.absPath : s.absPath;
   return `<div class="card" data-key="${esc(s.key)}">
     <div class="card-top">
       <div class="card-name">${esc(s.name)}${type}${linkBadge}</div>
@@ -310,8 +377,14 @@ function bindCards() {
     const s = state.view.find((x) => x.key === card.dataset.key);
     if (!s) return;
     card.addEventListener('click', () => openDetail(s));
-    $('.act-copy', card).addEventListener('click', (e) => { e.stopPropagation(); openCopyModal(s); });
-    $('.act-del', card).addEventListener('click', (e) => { e.stopPropagation(); deleteSkill(s); });
+    $('.act-copy', card).addEventListener('click', (e) => {
+      e.stopPropagation();
+      openCopyModal(s);
+    });
+    $('.act-del', card).addEventListener('click', (e) => {
+      e.stopPropagation();
+      deleteSkill(s);
+    });
   });
 }
 
@@ -339,13 +412,14 @@ function renderGrid() {
     const a = agentById(state.filter);
     sections = [{ title: '', tag: '', dir: '', items: state.view.filter((s) => !s.project && s.allAgentIds.includes(state.filter) && match(s)) }];
     if (a) {
-      const dirs = (a.dirs || [])
-        .map((d) => {
-          const missing = state.missing.some((m2) => m2.dir === expand(d));
-          return `<span class="dir-chip ${missing ? 'warn' : ''}" title="${esc(expand(d))}${missing ? '（' + t('目录不存在，安装时将自动创建') + '）' : ''}">
+      const dirs =
+        (a.dirs || [])
+          .map((d) => {
+            const missing = state.missing.some((m2) => m2.dir === expand(d));
+            return `<span class="dir-chip ${missing ? 'warn' : ''}" title="${esc(expand(d))}${missing ? '（' + t('目录不存在，安装时将自动创建') + '）' : ''}">
             ${missing ? '<span class="warn-ico">⚠</span>' : ''}${esc(d)}<span class="rm cfg-dir-rm" data-dir="${esc(d)}">×</span></span>`;
-        })
-        .join('') || `<span class="hint">${t('暂无目录')}</span>`;
+          })
+          .join('') || `<span class="hint">${t('暂无目录')}</span>`;
       cfgCard = `<div class="agent-block scope-cfg">
         <div class="dash-sec">${t('SKILL 目录')}</div>
         <div class="dir-chips">${dirs}</div>
@@ -364,9 +438,7 @@ function renderGrid() {
     body = `<div class="empty"><div class="big">${FOLDER_BIG}</div>
       ${t('还没有扫描到任何 SKILL。<br>选择左侧 Agent 可「＋ 添加 SKILL 目录」，或点击「＋ 添加项目」登记项目目录。')}</div>`;
   } else if (!total) {
-    body = `<div class="empty"><div class="big">${SEARCH_BIG}</div>${
-      q ? tf('没有匹配「{q}」的 SKILL', { q: esc(q) }) : t('当前筛选下暂无 SKILL')
-    }</div>`;
+    body = `<div class="empty"><div class="big">${SEARCH_BIG}</div>${q ? tf('没有匹配「{q}」的 SKILL', { q: esc(q) }) : t('当前筛选下暂无 SKILL')}</div>`;
   } else {
     body = sections
       .map(
@@ -385,7 +457,10 @@ function renderGrid() {
   gridEl.onclick = async (e) => {
     const rmDir = e.target.closest('.cfg-dir-rm');
     if (rmDir) {
-      await saveAgentDirs(state.filter, (agentById(state.filter).dirs || []).filter((d) => d !== rmDir.dataset.dir));
+      await saveAgentDirs(
+        state.filter,
+        (agentById(state.filter).dirs || []).filter((d) => d !== rmDir.dataset.dir)
+      );
       return;
     }
     const addDir = e.target.closest('.act-dir-add');
@@ -399,7 +474,13 @@ function renderGrid() {
     }
     const delProj = e.target.closest('.act-proj-del');
     if (delProj) {
-      if (!confirm(tf('移除项目「{name}」？\n（只影响 CC Skill 的管理范围，不会删除磁盘上的任何文件）', { name: delProj.dataset.name }))) return;
+      const okRemove = await confirmModal({
+        title: t('移除项目'),
+        message: tf('移除项目「{name}」？\n（只影响 CC Skill 的管理范围，不会删除磁盘上的任何文件）', { name: delProj.dataset.name }),
+        confirmLabel: t('移除'),
+        danger: false,
+      });
+      if (!okRemove) return;
       await api.invoke('config:set', { agents: state.agents, projects: state.projects.filter((p) => p.id !== delProj.dataset.id) });
       toast(t('已移除项目 ✓'), 'ok');
       setFilter('dashboard');
@@ -486,7 +567,6 @@ function renderDashboard() {
       }))
     )
     .filter((sec) => sec.items.length);
-  const totalListed = sections.reduce((n, sec) => n + sec.items.length, 0);
 
   $('#main-hint').textContent = '';
   $('#grid').innerHTML = `
@@ -523,7 +603,10 @@ function renderDashboard() {
       .join('')}
   `;
   bindCards();
-  $('#dash-rescan').addEventListener('click', () => { scan(); toast(t('已重新扫描')); });
+  $('#dash-rescan').addEventListener('click', () => {
+    scan();
+    toast(t('已重新扫描'));
+  });
   $('#dash-dups').addEventListener('click', openDupsModal);
   $('#dash-new').addEventListener('click', openNewModal);
   $('#dash-import').addEventListener('click', () => $('#btn-import').click());
@@ -596,7 +679,12 @@ function renderDetailLinks(s) {
   }
   $('#btn-add-link').disabled = false;
   if (!s.links || !s.links.length) {
-    box.innerHTML = '<div class="log-empty" style="padding:30px">' + t('还没有安装任何链接') + '<br><span class="hint">' + t('点下方「安装链接到其他 Agent」，即可让其他 Agent 共用这份唯一副本') + '</span></div>';
+    box.innerHTML =
+      '<div class="log-empty" style="padding:30px">' +
+      t('还没有安装任何链接') +
+      '<br><span class="hint">' +
+      t('点下方「安装链接到其他 Agent」，即可让其他 Agent 共用这份唯一副本') +
+      '</span></div>';
     return;
   }
   box.innerHTML = s.links
@@ -630,7 +718,12 @@ $('#detail-links').addEventListener('click', async (e) => {
   const unBtn = e.target.closest('.act-link-uninstall');
   if (!unBtn) return;
   const row = unBtn.closest('.link-row');
-  if (!confirm(tf('卸载链接「{name}」？\n仅移除链接，唯一副本不受影响：\n{path}', { name: row.dataset.name, path: row.dataset.path }))) return;
+  const okUninstall = await confirmModal({
+    title: t('卸载链接'),
+    message: tf('卸载链接「{name}」？\n仅移除链接，唯一副本不受影响：\n{path}', { name: row.dataset.name, path: row.dataset.path }),
+    confirmLabel: t('卸载'),
+  });
+  if (!okUninstall) return;
   const r = await api.invoke('skill:trash', { path: row.dataset.path });
   if (!r.ok) {
     toast(t('卸载失败：') + (r.error || ''), 'err');
@@ -673,11 +766,16 @@ async function deleteSkill(s, closeAfter = false) {
   } else if (s.linked) {
     msg = tf('移除链接「{name}」？\n仅移除链接，唯一副本（{p}）不受影响。', { name: s.name, p: shortPath(s.linkTarget || '') });
   } else if (s.linkCount) {
-    msg = tf('确定删除 SKILL「{name}」？\n注意：{n} 个 Agent 通过链接共用此唯一副本，删除后这些链接将失效。\n{path}', { name: s.name, n: s.linkCount, path: s.absPath });
+    msg = tf('确定删除 SKILL「{name}」？\n注意：{n} 个 Agent 通过链接共用此唯一副本，删除后这些链接将失效。\n{path}', {
+      name: s.name,
+      n: s.linkCount,
+      path: s.absPath,
+    });
   } else {
     msg = tf('确定删除 SKILL「{name}」吗？\n将移入回收站：\n{path}', { name: s.name, path: s.absPath });
   }
-  if (!confirm(msg)) return;
+  const okTrash = await confirmModal({ title: t('删除确认'), message: msg, confirmLabel: t('删除') });
+  if (!okTrash) return;
   const r = await api.invoke('skill:trash', { path: s.absPath });
   if (r.ok) {
     toast(r.linkRemoved ? t('已移除链接（唯一副本保留）🗑') : t('已移入回收站 🗑'), 'ok');
@@ -790,7 +888,8 @@ async function openDupsModal() {
     <div class="dup-group" data-gi="${gi}">
       <div class="dup-head"><b>${esc(g.folder)}</b><span class="dup-tag" id="dup-tag-${gi}">${t('比对中…')}</span></div>
       ${g.copies
-        .map((c, ci) => `
+        .map(
+          (c, ci) => `
         <div class="dup-row">
           <label class="dup-keep"><input type="radio" name="keep-${gi}" value="${ci}" ${ci === 0 ? 'checked' : ''} /> ${t('保留')}</label>
           <span class="dup-path" title="${esc(c.absPath)}">${esc(shortPath(c.parentDir))}</span>
@@ -801,7 +900,8 @@ async function openDupsModal() {
             })
             .join(' ')}</span>
           <span class="dup-files">${c.fileCount} ${t('个文件')}</span>
-        </div>`)
+        </div>`
+        )
         .join('')}
       <button class="btn sm primary act-merge" data-gi="${gi}">${g.hasProject ? t('合并 / 同步（项目侧覆盖为保留副本内容）') : t('合并：其余替换为链接')}</button>
     </div>`
@@ -809,9 +909,7 @@ async function openDupsModal() {
     .join('');
   openModal('modal-dups');
   for (const [gi, g] of groups.entries()) {
-    const results = await Promise.all(
-      g.copies.slice(1).map((c) => api.invoke('skill:compare', { pathA: g.copies[0].absPath, pathB: c.absPath }))
-    );
+    const results = await Promise.all(g.copies.slice(1).map((c) => api.invoke('skill:compare', { pathA: g.copies[0].absPath, pathB: c.absPath })));
     g.same = results.every((r) => r.ok && r.same);
     const el = $('#dup-tag-' + gi);
     if (el) {
@@ -831,9 +929,16 @@ $('#dups-list').addEventListener('click', async (e) => {
   const others = g.copies.filter((c, i2) => i2 !== keepIdx);
   const warn = g.same === false ? '\n\n' + t('注意：各副本内容不同，未选中的全局副本将进入回收站（可找回）。') : '';
   const action = g.hasProject
-    ? tf('以 {p} 中的副本为准：\n· 其余全局目录中的副本 → 移入回收站并替换为链接\n· 项目目录中的副本 → 用保留副本的内容覆盖同步（Git 仓库不建链接）', { p: shortPath(keep.parentDir) }) + warn
+    ? tf('以 {p} 中的副本为准：\n· 其余全局目录中的副本 → 移入回收站并替换为链接\n· 项目目录中的副本 → 用保留副本的内容覆盖同步（Git 仓库不建链接）', {
+        p: shortPath(keep.parentDir),
+      }) + warn
     : tf('保留 {p} 中的副本作为唯一实体，\n其余 {n} 份移入回收站并替换为链接。', { p: shortPath(keep.parentDir), n: others.length }) + warn;
-  if (!confirm(tf('合并「{name}」：\n{action}\n\n继续？', { name: g.folder, action }))) return;
+  const okMerge = await confirmModal({
+    title: t('合并重复'),
+    message: tf('合并「{name}」：\n{action}\n\n继续？', { name: g.folder, action }),
+    confirmLabel: t('合并'),
+  });
+  if (!okMerge) return;
   const r = await performMerge(g, keepIdx);
   if (r.failed === 0) {
     const parts = [t('1 份唯一副本')];
@@ -1004,6 +1109,11 @@ $('#btn-import-go').addEventListener('click', async () => {
 });
 
 // ------------------------------ WebDAV 云同步 ---------------------------------
+const WD_STATUS_HINT = '备份内容 = 全局 + 项目内所有实体 SKILL（链接不会上传）；密码保存在本机配置文件中，请注意磁盘安全。';
+const wdResetStatus = () => {
+  $('#wd-status').textContent = t(WD_STATUS_HINT);
+};
+
 function fillWebdavInputs(w) {
   w = w || {};
   $('#wd-url').value = w.url || '';
@@ -1012,7 +1122,7 @@ function fillWebdavInputs(w) {
   $('#wd-path').value = w.remotePath || 'cc-skill-sync';
   $('#wd-auto').checked = !!w.autoBackup;
   $('#wd-freq').value = w.autoBackupFreq || 'startup';
-  $('#wd-status').textContent = t('备份内容 = 全局 + 项目内所有实体 SKILL（链接不会上传）；密码保存在本机配置文件中，请注意磁盘安全。');
+  wdResetStatus();
 }
 
 function wdReadInputs() {
@@ -1048,7 +1158,13 @@ $('#btn-wd-test').addEventListener('click', async () => {
 });
 $('#btn-wd-backup').addEventListener('click', async () => {
   if (!(await wdSave())) return;
-  if (!confirm(t('将所有实体 SKILL（全局 + 项目）打包备份到 WebDAV？\n（链接本身不上传，恢复时会按记录重建）'))) return;
+  const okBackup = await confirmModal({
+    title: t('上传到云端'),
+    message: t('将所有实体 SKILL（全局 + 项目）打包备份到 WebDAV？\n（链接本身不上传，恢复时会按记录重建）'),
+    confirmLabel: t('开始上传'),
+    danger: false,
+  });
+  if (!okBackup) return;
   $('#wd-status').textContent = t('正在打包并上传…');
   const r = await api.invoke('sync:backup');
   if (r.ok) {
@@ -1060,49 +1176,66 @@ $('#btn-wd-backup').addEventListener('click', async () => {
     toast(t('备份失败：') + r.error, 'err');
   }
 });
+// 点击「从云端下载」：弹窗先行（瞬间可见）→ 后台只取廉价元数据 → 用户点确认后才真正下载整包
+let restoreSeq = 0;
+const RESTORE_FIELDS = ['#rv-host', '#rv-time', '#rv-remote', '#rv-size', '#rv-content'];
+
 $('#btn-wd-restore').addEventListener('click', async () => {
-  const btn = $('#btn-wd-restore');
-  if (!(await wdSave())) return;
+  const seq = ++restoreSeq;
+  const btn = $('#btn-restore-confirm');
+  // 本次弹窗是否已被取消 / 被更新的一次点击取代；过期结果一律丢弃
+  const stale = () => seq !== restoreSeq || $('#modal-restore').classList.contains('hidden');
+
+  openModal('modal-restore');
   btn.disabled = true;
-  try {
-    $('#wd-status').textContent = t('正在获取云端备份信息…');
-    const info = await api.invoke('sync:restoreInfo', {});
-    if (!info.ok) {
-      $('#wd-status').textContent = '✗ ' + info.error;
-      return toast(info.error, 'err');
+  RESTORE_FIELDS.forEach((id) => {
+    $(id).textContent = t('读取中…');
+  });
+  $('#rv-status').textContent = t('正在获取云端备份信息…');
+  wdResetStatus();
+
+  const fail = (msg) => {
+    if (!stale()) {
+      closeModal('modal-restore');
+      toast(msg, 'err');
     }
-    $('#wd-status').textContent = info.size
-      ? tf('正在下载云端备份（{size}）…', { size: fmtSize(info.size) })
-      : t('正在下载云端备份…');
-    const r = await api.invoke('sync:restorePreview', { name: info.name });
-    if (!r.ok) {
-      $('#wd-status').textContent = '✗ ' + r.error;
-      return toast(r.error, 'err');
-    }
-    state.restoreToken = r.tmpToken;
-    $('#rv-host').textContent = r.hostname || '—';
-    const tRaw = r.uploadedAt || info.uploadedAt || '';
-    const d = new Date(tRaw);
-    $('#rv-time').textContent = tRaw ? (isNaN(d) ? tRaw : d.toLocaleString()) : '—';
-    $('#rv-remote').textContent = r.remote;
-    $('#rv-size').textContent = info.size ? fmtSize(info.size) : '—';
-    $('#rv-content').textContent = tf('{n} 个 SKILL + config.json', { n: r.entries });
-    $('#wd-status').textContent = t('备份内容 = 全局 + 项目内所有实体 SKILL（链接不会上传）；密码保存在本机配置文件中，请注意磁盘安全。');
-    openModal('modal-restore');
-  } finally {
-    btn.disabled = false;
-  }
+  };
+  if (!(await wdSave())) return fail(t('保存失败'));
+
+  const info = await api.invoke('sync:restoreInfo', {});
+  if (stale()) return;
+  if (!info.ok) return fail(info.error);
+
+  state.restoreName = info.name;
+  const d = new Date(info.uploadedAt);
+  $('#rv-host').textContent = info.hostname || '—';
+  $('#rv-time').textContent = info.uploadedAt ? (isNaN(d) ? info.uploadedAt : d.toLocaleString()) : '—';
+  $('#rv-remote').textContent = info.remote;
+  $('#rv-size').textContent = info.size ? fmtSize(info.size) : '—';
+  $('#rv-content').textContent = info.detailed ? tf('{n} 个 SKILL + config.json', { n: info.entries }) : t('—（旧版备份未附带元数据）');
+  $('#rv-status').textContent = '';
+  btn.disabled = false;
 });
 
 $('#btn-restore-confirm').addEventListener('click', async () => {
   const btn = $('#btn-restore-confirm');
   btn.disabled = true;
+  $('#rv-status').textContent = t('正在下载并恢复…');
   try {
-    const r = await api.invoke('sync:restoreApply', { tmpToken: state.restoreToken });
-    if (!r.ok) return toast(r.error, 'err');
+    const r = await api.invoke('sync:restoreApply', { name: state.restoreName });
+    if (!r.ok) {
+      $('#rv-status').textContent = '✗ ' + r.error;
+      return toast(r.error, 'err');
+    }
     toast(tf('已从云端恢复 {n} 个 SKILL ✓', { n: r.restored }), 'ok');
     if (r.appliedConfig) toast(t('配置也已恢复 ✓'), 'ok');
     closeModal('modal-restore');
+    // 备份里带了设置，界面偏好（含遮罩）要跟着刷新
+    if (r.appliedConfig) {
+      const p = await api.invoke('app:paths');
+      state.ui = p.ui || state.ui;
+      applyOverlay(state.ui);
+    }
     closeModal('modal-settings');
     state.filter = 'dashboard';
     $('#main-title').textContent = t('总览');
@@ -1114,17 +1247,73 @@ $('#btn-restore-confirm').addEventListener('click', async () => {
 });
 
 // ------------------------------ 设置 -----------------------------------------
+// 弹窗遮罩的毛玻璃 / 变暗程度：写进 CSS 变量，设置页里拖动即时预览
+const OVERLAY_BLUR_MAX = 40;
+const OVERLAY_DIM_MAX = 0.8;
+
+function applyOverlay(ui) {
+  const blur = Math.min(OVERLAY_BLUR_MAX, Math.max(0, Number(ui && ui.overlayBlur) || 0));
+  const dim = Math.min(OVERLAY_DIM_MAX, Math.max(0, Number(ui && ui.overlayDim) || 0));
+  const root = document.documentElement.style;
+  root.setProperty('--overlay-filter', blur > 0 ? `blur(${blur}px) saturate(130%)` : 'none');
+  root.setProperty('--overlay-dim', String(dim));
+}
+
+/** 把滑杆值同步到界面与预览 */
+function fillOverlayInputs(ui) {
+  const blur = Number(ui && ui.overlayBlur);
+  const dim = Number(ui && ui.overlayDim);
+  const b = Number.isFinite(blur) ? blur : 24;
+  const d = Number.isFinite(dim) ? dim : 0.3;
+  $('#set-overlay-blur').value = String(b);
+  $('#set-overlay-dim').value = String(Math.round(d * 100));
+  $('#set-overlay-blur-val').textContent = b + 'px';
+  $('#set-overlay-dim-val').textContent = Math.round(d * 100) + '%';
+}
+
+const readOverlayInputs = () => ({
+  overlayBlur: Number($('#set-overlay-blur').value),
+  overlayDim: Number($('#set-overlay-dim').value) / 100,
+});
+
+// 取消时用它把预览还原回已保存的值
+let overlaySnapshot = null;
+
 function openSettings() {
   fillWebdavInputs(state.webdav);
   $('#set-lang').value = (state.ui && state.ui.lang) || 'auto';
+  fillOverlayInputs(state.ui);
+  overlaySnapshot = readOverlayInputs();
   openModal('modal-settings');
 }
+
+function closeSettings(revertPreview) {
+  if (revertPreview && overlaySnapshot) applyOverlay(overlaySnapshot);
+  closeModal('modal-settings');
+}
+
+// 拖动即时预览（不落盘，保存时才写配置）
+['#set-overlay-blur', '#set-overlay-dim'].forEach((sel) => {
+  $(sel).addEventListener('input', () => {
+    const o = readOverlayInputs();
+    applyOverlay(o);
+    fillOverlayInputs(o);
+  });
+});
+$('#set-close').addEventListener('click', () => closeSettings(true));
+$('#set-cancel').addEventListener('click', () => closeSettings(true));
+$('#modal-settings').addEventListener('mousedown', (e) => {
+  if (e.target === e.currentTarget) closeSettings(true);
+});
 
 $('#btn-save-settings').addEventListener('click', async () => {
   if (!(await wdSave())) return;
   const lang = $('#set-lang').value;
-  const r = await api.invoke('config:set', { ui: { lang } });
+  const r = await api.invoke('config:set', { ui: { lang, ...readOverlayInputs() } });
   if (r.ok) {
+    state.ui = r.ui || { lang };
+    applyOverlay(state.ui);
+    overlaySnapshot = readOverlayInputs();
     i18n.setLang(lang);
     i18n.apply(document);
     toast(t('设置已保存 ✓'), 'ok');
@@ -1136,7 +1325,12 @@ $('#btn-save-settings').addEventListener('click', async () => {
 });
 
 $('#btn-reset-agents').addEventListener('click', async () => {
-  if (!confirm(t('恢复为默认的 Agent、目录与项目配置？（项目列表会被清空）'))) return;
+  const okReset = await confirmModal({
+    title: t('恢复默认配置'),
+    message: t('恢复为默认的 Agent、目录与项目配置？（项目列表会被清空）'),
+    confirmLabel: t('恢复默认'),
+  });
+  if (!okReset) return;
   const r = await api.invoke('config:reset');
   if (r.ok) {
     state.agents = r.agents;
@@ -1151,7 +1345,10 @@ $('#btn-reset-agents').addEventListener('click', async () => {
 $('#wc-min').addEventListener('click', () => api.invoke('win:minimize'));
 $('#wc-max').addEventListener('click', () => api.invoke('win:maximize'));
 $('#wc-close').addEventListener('click', () => api.invoke('win:close'));
-$('#btn-rescan').addEventListener('click', () => { scan(); toast(t('已重新扫描')); });
+$('#btn-rescan').addEventListener('click', () => {
+  scan();
+  toast(t('已重新扫描'));
+});
 $('#btn-dups').addEventListener('click', openDupsModal);
 $('#btn-logs').addEventListener('click', openLogs);
 $('#btn-new').addEventListener('click', openNewModal);
@@ -1196,6 +1393,9 @@ document.addEventListener('keydown', (e) => {
   state.HOME = p.home || '';
   state.logFile = p.logFile || '';
   state.ui = p.ui || { lang: 'auto' };
+  // 让样式表知道平台：macOS 用系统红绿灯，需要隐藏自绘窗口按钮并给左上角留位
+  document.body.dataset.platform = p.platform || '';
+  applyOverlay(state.ui);
   i18n.setLang(state.ui.lang || 'auto');
   i18n.apply(document);
   await scan();

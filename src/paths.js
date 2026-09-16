@@ -1,0 +1,87 @@
+// 平台差异与路径工具。刻意不依赖 electron —— 这些函数是纯的，能直接被单测调用。
+const path = require('path');
+const os = require('os');
+const fs = require('fs');
+
+/** 项目根目录（开发模式下等同 Electron 的 app.getAppPath()） */
+const ROOT = path.join(__dirname, '..');
+
+// Windows：junction 链接 + PowerShell 打包；macOS / Linux：symlink + zip/unzip
+const IS_WIN = process.platform === 'win32';
+const LINK_TYPE = IS_WIN ? 'junction' : 'dir';
+
+// 临时目录由宿主注入（Electron 里是 app.getPath('temp')），默认取系统临时目录
+let tempDirOverride = null;
+function setTempDir(dir) {
+  tempDirOverride = dir;
+}
+function tempDir() {
+  return tempDirOverride || os.tmpdir();
+}
+
+const expand = (p) => (p && p.startsWith('~') ? path.join(os.homedir(), p.slice(1)) : p);
+
+const toTilde = (p) => {
+  const s = String(p || '').trim();
+  if (!s) return s;
+  const h = os.homedir();
+  if (!h || !s.toLowerCase().startsWith(h.toLowerCase())) return s;
+  const rest = s.slice(h.length).split(String.fromCharCode(92)).filter(Boolean).join('/');
+  return '~/' + rest.split('/').filter(Boolean).join('/');
+};
+
+const basenameOf = (p) =>
+  String(p || '')
+    .split(/[\\/]+/)
+    .filter(Boolean)
+    .pop() || String(p || '');
+
+/** PowerShell 单引号字符串转义 */
+const ps = (s) => String(s).replace(/'/g, "''");
+
+/**
+ * 解析数据目录（config.json / cc-skill.log / userData 的落点）。
+ * - override（CC_SKILL_DATA_DIR）最优先：测试隔离与便携多实例
+ * - macOS：.app 是只读的代码签名包，配置写进去会破坏签名、且随版本更新被覆盖，
+ *   所以用系统标准位置（~/Library/Application Support/<App>）
+ * - Windows / Linux：保持便携语义——配置与 exe 同级，整个目录拷走即可
+ */
+function resolveDataDir({ override, platform, exeDir, systemUserData }) {
+  if (override) return override;
+  return platform === 'darwin' ? systemUserData : exeDir;
+}
+
+// 本应用在临时目录下创建的名字：<前缀>-<毫秒时间戳>[.zip]。
+// 必须精确到这个形状——只按前缀匹配会误删名字碰巧相似的其他目录。
+const TEMP_DIR_RE = /^cc-skill-(?:import|sync|restore)-\d+(?:\.zip)?$/;
+
+/**
+ * 清理遗留的临时工作目录。
+ * 正常流程里这些目录用完即删，但进程被杀 / 崩溃时会留下；启动时扫一遍避免长期堆积。
+ * 只删名字完全匹配且超过 maxAgeMs 的，绝不碰正在进行中的操作，也不碰别人的目录。
+ */
+function sweepStaleTempDirs({ maxAgeMs = 3600000, matches = (name) => TEMP_DIR_RE.test(name) } = {}) {
+  const root = tempDir();
+  let names;
+  try {
+    names = fs.readdirSync(root);
+  } catch (_) {
+    return 0;
+  }
+  const now = Date.now();
+  let removed = 0;
+  for (const name of names) {
+    if (!matches(name)) continue;
+    const full = path.join(root, name);
+    try {
+      if (now - fs.statSync(full).mtimeMs < maxAgeMs) continue;
+      fs.rmSync(full, { recursive: true, force: true });
+      removed++;
+    } catch (_) {
+      /* 被占用就留给下次 */
+    }
+  }
+  return removed;
+}
+
+module.exports = { ROOT, IS_WIN, LINK_TYPE, expand, toTilde, basenameOf, ps, setTempDir, tempDir, sweepStaleTempDirs, resolveDataDir };

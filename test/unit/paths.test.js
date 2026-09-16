@@ -1,0 +1,122 @@
+// 路径与平台工具——纯函数
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const os = require('os');
+const path = require('path');
+const fs = require('fs');
+const { expand, toTilde, basenameOf, ps, IS_WIN, LINK_TYPE, tempDir, setTempDir, sweepStaleTempDirs, resolveDataDir } = require('../../src/paths');
+const { tmpDir } = require('../helpers/fixtures');
+
+test('expand 把 ~ 展开成用户主目录', () => {
+  assert.equal(expand('~/.claude/skills'), path.join(os.homedir(), '.claude', 'skills'));
+  assert.equal(expand('~/'), os.homedir() + path.sep);
+});
+
+test('expand 对绝对路径 / 空值原样返回', () => {
+  assert.equal(expand('C:\\x\\y'), 'C:\\x\\y');
+  assert.equal(expand(''), '');
+  assert.equal(expand(null), null);
+  assert.equal(expand(undefined), undefined);
+});
+
+test('toTilde 把主目录下的路径收敛成 ~ 形式', () => {
+  assert.equal(toTilde(path.join(os.homedir(), '.claude', 'skills')), '~/.claude/skills');
+});
+
+test('toTilde 对主目录之外的路径原样返回', () => {
+  const outside = IS_WIN ? 'D:\\elsewhere\\skills' : '/elsewhere/skills';
+  assert.equal(toTilde(outside), outside);
+  assert.equal(toTilde(''), '');
+  assert.equal(toTilde(null), '');
+});
+
+test('expand / toTilde 互为逆运算', () => {
+  const abs = path.join(os.homedir(), 'a', 'b', 'c');
+  assert.equal(expand(toTilde(abs)), abs);
+});
+
+test('toTilde 大小写不敏感（Windows 盘符与用户名大小写）', () => {
+  const upper = path.join(os.homedir().toUpperCase(), 'skills');
+  assert.equal(toTilde(upper), '~/skills');
+});
+
+test('basenameOf 兼容两种分隔符', () => {
+  assert.equal(basenameOf('C:\\a\\b\\proj'), 'proj');
+  assert.equal(basenameOf('/a/b/proj'), 'proj');
+  assert.equal(basenameOf('proj'), 'proj');
+  assert.equal(basenameOf(''), '');
+  assert.equal(basenameOf(null), '');
+});
+
+test('ps 转义 PowerShell 单引号', () => {
+  assert.equal(ps("C:\\it's\\here"), "C:\\it''s\\here");
+  assert.equal(ps('plain'), 'plain');
+});
+
+test('链接类型与平台匹配', () => {
+  assert.equal(LINK_TYPE, IS_WIN ? 'junction' : 'dir');
+});
+
+test('tempDir 可被宿主覆盖，默认回落到系统临时目录', () => {
+  const original = tempDir();
+  setTempDir('C:\\fake\\temp');
+  assert.equal(tempDir(), 'C:\\fake\\temp');
+  setTempDir(null);
+  assert.equal(tempDir(), os.tmpdir());
+  setTempDir(original);
+});
+
+test('resolveDataDir：显式指定最优先，macOS 用系统标准位置，其余平台用 exe 同级', () => {
+  const win = { platform: 'win32', exeDir: 'C:\\portable\\CC Skill', systemUserData: 'C:\\Users\\x\\AppData\\Roaming\\CC Skill' };
+  assert.equal(resolveDataDir(win), win.exeDir, 'Windows 保持便携语义');
+  assert.equal(resolveDataDir({ ...win, platform: 'linux' }), win.exeDir, 'Linux 同样与可执行文件同级');
+  assert.equal(resolveDataDir({ ...win, override: 'C:\\isolated' }), 'C:\\isolated', 'CC_SKILL_DATA_DIR 永远最优先');
+
+  const mac = { platform: 'darwin', exeDir: '/Applications/CC Skill.app/Contents/MacOS', systemUserData: '/Users/x/Library/Application Support/CC Skill' };
+  assert.equal(resolveDataDir(mac), mac.systemUserData, 'macOS 不能写进 .app 包内');
+  assert.equal(resolveDataDir({ ...mac, override: '/tmp/isolated' }), '/tmp/isolated');
+});
+
+test('sweepStaleTempDirs 只删「过期 + 属于本应用」的临时项', () => {
+  const dir = tmpDir('cc-skill-sweep-');
+  const original = tempDir();
+  setTempDir(dir);
+  const twoHoursAgo = new Date(Date.now() - 2 * 3600 * 1000);
+  const make = (name, { age, isFile } = {}) => {
+    const p = path.join(dir, name);
+    if (isFile) fs.writeFileSync(p, 'x', 'utf8');
+    else fs.mkdirSync(p);
+    if (age) fs.utimesSync(p, twoHoursAgo, twoHoursAgo);
+    return p;
+  };
+  try {
+    const staleDir = make('cc-skill-import-1789528818085', { age: true });
+    const staleFile = make('cc-skill-restore-1789528818085.zip', { age: true, isFile: true });
+    const staleSync = make('cc-skill-sync-1789528818085', { age: true });
+    const freshDir = make('cc-skill-import-1789533600441');
+    const foreign = make('some-other-app-dir', { age: true });
+    // 只按前缀匹配会误删这些：名字像但不是应用生成的
+    const lookalikes = ['cc-skill-restore-test', 'cc-skill-import-backup', 'cc-skill-restore-abc', 'cc-skill-import-1.old'].map((n) => make(n, { age: true }));
+
+    assert.equal(sweepStaleTempDirs(), 3, '应删掉 3 项过期的、名字精确匹配的目录/文件');
+    assert.ok(!fs.existsSync(staleDir));
+    assert.ok(!fs.existsSync(staleFile));
+    assert.ok(!fs.existsSync(staleSync));
+    assert.ok(fs.existsSync(freshDir), '没过期的不该删（可能正在用）');
+    assert.ok(fs.existsSync(foreign), '不是本应用的目录不该碰');
+    for (const p of lookalikes) assert.ok(fs.existsSync(p), `名字只是相似，不该删: ${path.basename(p)}`);
+  } finally {
+    setTempDir(original);
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('sweepStaleTempDirs 在临时目录不存在时安静返回', () => {
+  const original = tempDir();
+  setTempDir(path.join(os.tmpdir(), 'cc-skill-不存在的目录-' + Date.now()));
+  try {
+    assert.equal(sweepStaleTempDirs(), 0);
+  } finally {
+    setTempDir(original);
+  }
+});

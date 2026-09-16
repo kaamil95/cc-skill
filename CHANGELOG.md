@@ -10,6 +10,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - macOS support: junction links become symlinks, zip packing via native zip/unzip, traffic-light buttons adapted
 - UI i18n (Simplified Chinese / English), defaults to the system language, switchable in Settings
+- **Adjustable dialog backdrop** (Settings → Dialog backdrop): two sliders for the blur radius and the dim level behind dialogs, previewed live and persisted in the config
+- macOS packaging: `npm run dist:mac` produces a `.dmg` for both Apple Silicon and Intel, plus a `Build macOS` GitHub Actions workflow so a Mac build can be made without owning a Mac
+- Tests (`node --test`): unit tests plus integration tests that drive the real IPC handlers with a stubbed `electron` and an in-memory WebDAV server — no network, no real config
+- ESLint (flat config), Prettier and `.editorconfig`, plus a GitHub Actions workflow running lint / format check / tests on `windows-latest`
+- Backups now upload a small `latest.json` metadata sidecar (device, entry count, timestamp, size) next to the zip
+
+### Changed
+- All six native `confirm()` dialogs (upload to cloud, delete / uninstall / merge / remove project / reset defaults) replaced by one styled confirmation dialog matching the cloud-restore dialog — and destructive actions now get a red button while non-destructive ones stay neutral
+- Main process split into `src/` modules (`paths` / `config` / `skills` / `zip` / `webdav` / `ipc`); `main.js` is now just the entry point, and `src/` no longer imports `electron` so it can be unit-tested
+- IPC channel whitelist moved to `ipc-channels.js` as a single source of truth; `main.js` asserts at startup that every registered handler is listed
+- Restoring from the cloud now opens the confirmation dialog immediately and only downloads the backup after you confirm — previously the dialog waited for the full archive to download and unpack
+- `import:inspect` no longer shadows the module-level PowerShell escaping helper
+
+### Fixed
+- Restore no longer leaks a `cc-skill-restore-*` temp directory (and a copy of your backup zip) when the confirmation dialog is dismissed
+- Restore temp directories are cleaned up in a `finally`, so failed downloads or invalid archives leave nothing behind
+- Stale `cc-skill-import-*` / `-sync-*` / `-restore-*` working directories left behind by a crash are swept at startup (only ones older than an hour, so an in-flight operation is never touched)
+- SKILL.md frontmatter: values spanning multiple lines are now folded into one line instead of being cut at the first line break
+- SKILL.md frontmatter: escaped quotes and backslashes written by the "new skill" template are unescaped on read, so such names round-trip
+- `firstParagraph` now skips fenced code blocks as a whole, instead of picking a line of code as the fallback description
+- The blank line between frontmatter and body is fully stripped (previously one leading newline survived)
+- Restoring a backup no longer wipes the locally configured dialog-backdrop settings — the settings from the backup are merged over the local ones instead of replacing them wholesale
+- On macOS the config, log and Chromium profile now live in `~/Library/Application Support/CC Skill/` instead of inside the `.app` bundle, which is a read-only signed package (Windows keeps the portable layout: everything next to the exe)
+- Legacy `%APPDATA%` config migration is now Windows-only — on other platforms it could previously probe a relative path
+- Backup name validation tightened to reject path separators
+- Legacy config migration from `%APPDATA%` is skipped when `CC_SKILL_DATA_DIR` is set, so tests can no longer pick up the developer's real config
+- `build.files` now includes `src/` and `ipc-channels.js`, which the packaged app needs to start — guarded by a test that walks the require graph
 
 ## [0.0.1] - 2026-09-14
 

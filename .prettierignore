@@ -1,0 +1,19 @@
+# 只格式化「有逻辑的代码」。下面几类刻意排除，理由是重排它们的收益为零、噪音却很大：
+#   *.css / *.html    —— 作者手写的紧凑排版（单行规则、成对写在一行的网格标签），拆开反而更难读
+#   *.md              —— 文档里的表格与换行是手工排的
+#   renderer/i18n.js  —— 纯数据字典，键值对本身超长，重排只会把一行拆成两行
+*.css
+*.html
+*.md
+renderer/i18n.js
+
+node_modules/
+dist/
+dist2/
+user-data/
+.omc/
+assets/
+package-lock.json
+cc-skill.log
+config.json
+config.backup.json
