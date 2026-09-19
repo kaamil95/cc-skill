@@ -8,6 +8,7 @@ const { setTempDir, sweepStaleTempDirs, resolveDataDir } = require('./src/paths'
 const { initConfig } = require('./src/config');
 const { initMainMessages } = require('./src/i18n');
 const { registerIpcHandlers } = require('./src/ipc');
+const { startAutoBackup } = require('./src/webdav');
 
 let win = null;
 
@@ -101,6 +102,15 @@ if (!gotLock) {
   app.whenReady().then(() => {
     initConfig(DATA_DIR);
     createWindow();
+    // 自动备份：等窗口就绪再起，否则启动那一轮的结果推不出去；之后由定时器定期复查。
+    // 结果一律转给界面——后台悄悄发生的事，用户有权知道。
+    win.webContents.once('did-finish-load', () => {
+      startAutoBackup({
+        onResult: (r) => {
+          if (win && !win.isDestroyed()) win.webContents.send('sync:autoResult', r);
+        },
+      });
+    });
   });
   app.on('window-all-closed', () => app.quit());
 }

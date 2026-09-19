@@ -25,7 +25,6 @@ const IPC_CHANNELS = [
   'sync:backup',
   'sync:restoreInfo',
   'sync:restoreApply',
-  'sync:autoCheck',
   'win:minimize',
   'win:maximize',
   'win:close',

@@ -34,6 +34,7 @@ const state = {
   logs: [],
   unreadErrors: 0,
   restoreName: null,
+  restoreAgents: null,
   dupGroups: [],
   editingAgents: null,
   editingProjects: null,
@@ -41,12 +42,28 @@ const state = {
   logFile: '',
 };
 
-const expand = (p) => (p && p.startsWith('~') ? state.HOME + p.slice(1) : p);
-const shortPath = (p) => (state.HOME && p && p.toLowerCase().startsWith(state.HOME.toLowerCase()) ? '~' + p.slice(state.HOME.length) : p);
+// ~ 形式 ↔ 本机绝对路径。三个函数都必须做分隔符边界判断：只比对前缀会把
+// C:\Users\kaix 误判成 C:\Users\kai 之下的 ~/x，而路径一旦这样写进配置就再也还原不回来。
+// 比对前还要统一两种分隔符——Windows 上 C:\a\b 与 C:/a/b 是同一个目录。
+const isTilde = (p) => /^~(?=$|[\\/])/.test(String(p || '').trim());
+const toSlash = (p) =>
+  String(p || '')
+    .trim()
+    .replace(/\\/g, '/')
+    .replace(/\/+$/, '');
+const homePrefix = () => toSlash(state.HOME);
+const underHome = (p) => {
+  const h = homePrefix().toLowerCase();
+  if (!h || !p) return false;
+  const s = toSlash(p).toLowerCase();
+  return s === h || s.startsWith(h + '/');
+};
+const expand = (p) => (isTilde(p) ? state.HOME + String(p).trim().slice(1) : p);
+const shortPath = (p) => (underHome(p) ? '~' + toSlash(p).slice(homePrefix().length) : p);
 const toTilde = (p) => {
-  if (!state.HOME || !p || !p.toLowerCase().startsWith(state.HOME.toLowerCase())) return p;
-  const rest = p.slice(state.HOME.length).split(String.fromCharCode(92)).filter(Boolean).join('/');
-  return '~/' + rest.split('/').filter(Boolean).join('/');
+  if (!underHome(p)) return p;
+  const rest = toSlash(p).slice(homePrefix().length).split('/').filter(Boolean).join('/');
+  return rest ? '~/' + rest : '~';
 };
 const fmtSize = (n) => (n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(1) + ' KB' : (n / 1048576).toFixed(1) + ' MB');
 const isProjectTarget = (v) => {
@@ -1178,7 +1195,45 @@ $('#btn-wd-backup').addEventListener('click', async () => {
 });
 // 点击「从云端下载」：弹窗先行（瞬间可见）→ 后台只取廉价元数据 → 用户点确认后才真正下载整包
 let restoreSeq = 0;
-const RESTORE_FIELDS = ['#rv-host', '#rv-time', '#rv-remote', '#rv-size', '#rv-content'];
+const RESTORE_FIELDS = ['#rv-host', '#rv-time', '#rv-remote', '#rv-size', '#rv-content', '#rv-source'];
+
+// 恢复范围：按 Agent 勾选要重建哪些全局 SKILL，默认全选。
+// 旧版备份没有侧车元数据，拿不到 Agent 明细，只能整包恢复（此时不渲染勾选框）。
+function renderRestoreScope(info) {
+  const agents = Array.isArray(info.agents) ? info.agents : [];
+  const list = $('#rv-agents');
+  const skip = $('#rv-skip');
+  $('#rv-scope').hidden = !agents.length;
+  list.innerHTML = agents
+    .map(
+      (a) => `<label class="rs-item">
+        <input type="checkbox" class="rs-check" value="${esc(a.id)}" checked>
+        <span class="rs-name">${esc(a.name)}</span>
+        <span class="rs-dirs mono">${esc((a.dirs || []).join('   '))}</span>
+        <span class="rs-n">${tf('{n} 个 SKILL', { n: a.count })}</span>
+      </label>`
+    )
+    .join('');
+  list.querySelectorAll('.rs-check').forEach((el) => el.addEventListener('change', syncRestoreSelection));
+  const notes = [];
+  const projectCount = Number(info.projectCount) || 0;
+  if (projectCount) notes.push(tf('另有 {n} 个项目 SKILL 不在恢复范围内（随项目仓库走）', { n: projectCount }));
+  // 旧版备份没有 Agent 明细，也就拿不到 ~ 目录声明——只能整包恢复，目录要靠后缀匹配重新映射
+  if (info.detailed && !agents.length) notes.push(t('旧版备份的目录按原机器的用户目录记录，恢复时会自动映射到本机'));
+  skip.textContent = notes.join('\n');
+  skip.hidden = !notes.length;
+  syncRestoreSelection();
+}
+
+function syncRestoreSelection() {
+  const checks = [...$('#rv-agents').querySelectorAll('.rs-check')];
+  const picked = checks.filter((el) => el.checked).map((el) => el.value);
+  // 没有勾选框（旧版备份拿不到 Agent 明细）时必须是 null 而不是 []：
+  // 空数组到了后端是「一个 Agent 都不选」，会让恢复什么都不做
+  state.restoreAgents = checks.length ? picked : null;
+  // 有勾选项却一个都没选时，恢复会什么都不做——直接禁用按钮，别让用户白等一次下载
+  $('#btn-restore-confirm').disabled = checks.length > 0 && picked.length === 0;
+}
 
 $('#btn-wd-restore').addEventListener('click', async () => {
   const seq = ++restoreSeq;
@@ -1213,8 +1268,11 @@ $('#btn-wd-restore').addEventListener('click', async () => {
   $('#rv-remote').textContent = info.remote;
   $('#rv-size').textContent = info.size ? fmtSize(info.size) : '—';
   $('#rv-content').textContent = info.detailed ? tf('{n} 个 SKILL + config.json', { n: info.entries }) : t('—（旧版备份未附带元数据）');
+  // 备份来源：本机备份过就用自己的那份，否则退回云端最新的一条
+  $('#rv-source').textContent = info.source === 'local' ? t('本机上次备份') : t('云端最新一条（本机尚未备份过）');
+  // 按钮的可用状态由 syncRestoreSelection 决定（全选/未选/旧版无勾选框三种情况都已覆盖）
+  renderRestoreScope(info);
   $('#rv-status').textContent = '';
-  btn.disabled = false;
 });
 
 $('#btn-restore-confirm').addEventListener('click', async () => {
@@ -1222,12 +1280,23 @@ $('#btn-restore-confirm').addEventListener('click', async () => {
   btn.disabled = true;
   $('#rv-status').textContent = t('正在下载并恢复…');
   try {
-    const r = await api.invoke('sync:restoreApply', { name: state.restoreName });
+    const r = await api.invoke('sync:restoreApply', { name: state.restoreName, agentIds: state.restoreAgents });
     if (!r.ok) {
       $('#rv-status').textContent = '✗ ' + r.error;
       return toast(r.error, 'err');
     }
     toast(tf('已从云端恢复 {n} 个 SKILL ✓', { n: r.restored }), 'ok');
+    if (r.relocated?.length) toast(tf('{n} 个旧版目录已按本机用户目录重新映射', { n: r.relocated.length }), 'ok');
+    // 下面两条是设计如此（不算失败），用中性级别，免得跟真正的错误混在一起
+    if (r.skippedProjects) toast(tf('未恢复 {n} 个项目 SKILL（随项目仓库走）', { n: r.skippedProjects }), '');
+    if (r.projectConfigSkipped) toast(tf('未恢复 {n} 个项目配置（不同电脑的项目路径不通用）', { n: r.projectConfigSkipped }), '');
+    if (r.skippedAgents) toast(tf('未恢复 {n} 个未勾选 Agent 的 SKILL', { n: r.skippedAgents }), '');
+    // 这两种是「本该恢复却没恢复成」，必须报出来——静默跳过正是当初那个缺陷的形态
+    if (r.skippedExternal?.length) {
+      const n = r.skippedExternal.reduce((s, x) => s + x.count, 0);
+      toast(tf('未恢复 {n} 个 SKILL：{p} 无法映射到本机目录', { n, p: r.skippedExternal.map((x) => x.dir).join('、') }), 'err');
+    }
+    if (r.skippedInvalid) toast(tf('跳过 {n} 个路径非法的条目', { n: r.skippedInvalid }), 'err');
     if (r.appliedConfig) toast(t('配置也已恢复 ✓'), 'ok');
     closeModal('modal-restore');
     // 备份里带了设置，界面偏好（含遮罩）要跟着刷新
@@ -1387,6 +1456,20 @@ document.addEventListener('keydown', (e) => {
 });
 
 // ------------------------------ 启动 -----------------------------------------
+// 自动备份的结果由主进程推送。**必须最先注册**：主进程在窗口 did-finish-load 后才起调度，
+// 而这里下面有几个 await，注册晚了就可能漏掉启动那一轮的通知。
+// 回调体只用到下面几个 await 之后的 state，等事件真到了再读也不迟。
+api.onSyncAuto?.((r) => {
+  if (r.error) return toast(t('自动备份失败：') + r.error, 'err');
+  if (r.skipped === 'needs-first-backup') {
+    return toast(t('自动备份已暂停：本机还没有备份过，请先手动备份一次'), 'err');
+  }
+  toast(tf('已自动备份 {n} 个 SKILL ✓', { n: r.count }), 'ok');
+  api.invoke('sync:getConfig').then((c) => {
+    if (c && c.ok) state.webdav = c.webdav;
+  });
+});
+
 (async () => {
   i18n.apply(document);
   const p = await api.invoke('app:paths');

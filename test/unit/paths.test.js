@@ -40,6 +40,34 @@ test('toTilde 大小写不敏感（Windows 盘符与用户名大小写）', () =
   assert.equal(toTilde(upper), '~/skills');
 });
 
+test('toTilde 做分隔符边界判断，不把「同前缀的兄弟目录」误当成用户目录', () => {
+  const home = os.homedir();
+  // home 是 C:\Users\kai 时，C:\Users\kaix 绝不能被收敛成 ~/x —— 那是不可逆的路径污染
+  assert.equal(toTilde(home + 'x'), home + 'x');
+  assert.equal(toTilde(home + 'x' + path.sep + 'skills'), home + 'x' + path.sep + 'skills');
+});
+
+test('用户目录自身收敛成 ~ 而不是 ~/', () => {
+  assert.equal(toTilde(os.homedir()), '~');
+  assert.equal(expand('~'), os.homedir());
+});
+
+test('expand 只把 ~ 后紧跟分隔符的路径当作家目录', () => {
+  assert.equal(expand('~foo'), '~foo');
+});
+
+test('toTilde 兼容正斜杠写法（Windows 上 C:\\a 与 C:/a 是同一个目录）', () => {
+  const fwd = os.homedir().split('\\').join('/');
+  assert.equal(toTilde(fwd + '/skills'), '~/skills');
+  assert.equal(toTilde(fwd), '~');
+  assert.equal(toTilde(os.homedir() + '/skills'), '~/skills', '混合分隔符也要认出来');
+});
+
+test('toTilde 保留原始大小写（只有比对是小写化的）', () => {
+  const mixed = path.join(os.homedir(), 'AppData', 'Local', 'Temp', 'MixedCase');
+  assert.equal(toTilde(mixed), '~/AppData/Local/Temp/MixedCase');
+});
+
 test('basenameOf 兼容两种分隔符', () => {
   assert.equal(basenameOf('C:\\a\\b\\proj'), 'proj');
   assert.equal(basenameOf('/a/b/proj'), 'proj');

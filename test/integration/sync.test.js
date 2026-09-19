@@ -79,6 +79,13 @@ test('sync:backup 上传整包 + latest.json 元数据', async () => {
   assert.equal(meta.hostname, os.hostname());
   assert.equal(meta.entries, 2);
   assert.equal(meta.size, r.size);
+
+  // 本机专属侧车：恢复时据此优先取「本机自己上传的那份」，而不是云端最新那条
+  const hostPath = stub.hostMetaPath();
+  assert.ok(hostPath, '应同时上传本机专属侧车文件');
+  assert.equal(stub.readJson(hostPath).name, r.name);
+  assert.ok(meta.agents.length > 0, '侧车要带 Agent 维度汇总，弹窗才能按 Agent 勾选');
+  assert.equal(meta.projectCount, 0, '本次没有项目级 SKILL');
 });
 
 test('sync:restoreInfo 只读元数据，不下载整包', async () => {
@@ -89,6 +96,7 @@ test('sync:restoreInfo 只读元数据，不下载整包', async () => {
   assert.equal(r.hostname, os.hostname());
   assert.equal(r.entries, 2);
   assert.ok(r.size > 0);
+  assert.equal(r.source, 'local', '本机备份过就用本机那份');
   assert.deepEqual(stub.zipDownloads(), [], '确认前不该下载整包');
 });
 
@@ -100,6 +108,7 @@ test('旧备份（无 latest.json）降级为 HEAD，且同样不下载整包', 
   assert.equal(r.detailed, false);
   assert.equal(r.hostname, '');
   assert.equal(r.entries, 0);
+  assert.equal(r.source, 'latest', '读不到侧车元数据时退回全局最新一条');
   assert.ok(r.size > 0, '大小应回退到 HEAD 的 content-length');
   assert.deepEqual(stub.zipDownloads(), [], '降级路径同样不该下载整包');
   stub.hideMeta = false;

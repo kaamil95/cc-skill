@@ -41,8 +41,15 @@ function makeElectronStub({ dataDir, workDir, trashItem }) {
     },
     ipcMain: { handle: (ch, fn) => handlers.set(ch, fn) },
     BrowserWindow: class {
+      constructor() {
+        // main.js 会在窗口上挂 did-finish-load 并把自动备份结果推给渲染层，桩必须如实建模
+        this.webContents = { on: () => {}, once: () => {}, send: () => {} };
+      }
       loadFile() {}
       on() {}
+      isDestroyed() {
+        return false;
+      }
     },
     Menu: { setApplicationMenu: () => {} },
     dialog: { showOpenDialog: async () => ({ canceled: true, filePaths: [] }) },

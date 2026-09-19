@@ -19,15 +19,35 @@ function tempDir() {
   return tempDirOverride || os.tmpdir();
 }
 
-const expand = (p) => (p && p.startsWith('~') ? path.join(os.homedir(), p.slice(1)) : p);
+/** 是否 ~ 开头的家目录相对路径。要求 ~ 后紧跟分隔符或结尾，避免把 ~foo 当成路径 */
+const isTilde = (p) => /^~(?=$|[\\/])/.test(String(p || '').trim());
 
+/** ~ 形式 → 本机绝对路径。跨机器同步的正确性完全建立在「两端各自展开自己的 home」之上 */
+const expand = (p) => (isTilde(p) ? path.join(os.homedir(), String(p).trim().slice(1)) : p);
+
+/**
+ * 绝对路径 → ~ 形式，让配置能跨机器复用。
+ * 两条硬要求：
+ * 1. 必须做分隔符边界判断——只比对前缀会把 C:\Users\kaix 误判成 C:\Users\kai 之下的 ~/x，
+ *    而路径一旦被这样写进配置就再也还原不回来。
+ * 2. 必须先把两种分隔符统一再比对——Windows 上 C:\a\b 与 C:/a/b 是同一个目录，
+ *    只比对原样字符串会漏掉正斜杠写法（手改配置、或别的工具写进去的路径常是这样）。
+ * 同理，home 自身要收敛成 ~ 而不是 ~/。
+ */
 const toTilde = (p) => {
   const s = String(p || '').trim();
-  if (!s) return s;
-  const h = os.homedir();
-  if (!h || !s.toLowerCase().startsWith(h.toLowerCase())) return s;
-  const rest = s.slice(h.length).split(String.fromCharCode(92)).filter(Boolean).join('/');
-  return '~/' + rest.split('/').filter(Boolean).join('/');
+  if (!s || isTilde(s)) return s;
+  const h = os.homedir().replace(/[\\/]+$/, '');
+  if (!h) return s;
+  // sn 只统一分隔符、保留原始大小写（它要用来切出相对部分）；
+  // 小写化只用于比对，绝不能拿小写串去切片，否则会把路径的大小写吃掉
+  const sn = s.replace(/\\/g, '/');
+  const hn = h.replace(/\\/g, '/');
+  const snLower = sn.toLowerCase();
+  const hnLower = hn.toLowerCase();
+  if (snLower !== hnLower && !snLower.startsWith(hnLower + '/')) return s;
+  const rest = sn.slice(hn.length).replace(/\/+$/, '').split('/').filter(Boolean).join('/');
+  return rest ? '~/' + rest : '~';
 };
 
 const basenameOf = (p) =>
@@ -84,4 +104,4 @@ function sweepStaleTempDirs({ maxAgeMs = 3600000, matches = (name) => TEMP_DIR_R
   return removed;
 }
 
-module.exports = { ROOT, IS_WIN, LINK_TYPE, expand, toTilde, basenameOf, ps, setTempDir, tempDir, sweepStaleTempDirs, resolveDataDir };
+module.exports = { ROOT, IS_WIN, LINK_TYPE, expand, isTilde, toTilde, basenameOf, ps, setTempDir, tempDir, sweepStaleTempDirs, resolveDataDir };

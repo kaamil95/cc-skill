@@ -294,9 +294,15 @@
           <span class="rg-label" data-i18n="远程路径">远程路径</span><span class="rg-val mono" id="rv-remote"></span>
           <span class="rg-label" data-i18n="备份大小">备份大小</span><span class="rg-val mono" id="rv-size"></span>
           <span class="rg-label" data-i18n="包含内容">包含内容</span><span class="rg-val" id="rv-content"></span>
+          <span class="rg-label" data-i18n="备份来源">备份来源</span><span class="rg-val" id="rv-source"></span>
+        </div>
+        <div class="restore-scope" id="rv-scope" hidden>
+          <div class="rs-title" data-i18n="要重建哪些 Agent 的全局 SKILL">要重建哪些 Agent 的全局 SKILL</div>
+          <div class="rs-list" id="rv-agents"></div>
+          <div class="hint" id="rv-skip" hidden></div>
         </div>
         <div class="hint" id="rv-status" style="margin-bottom:8px"></div>
-        <div class="restore-warn" data-i18n="恢复将覆盖本地所有数据和技能配置">恢复将覆盖本地所有数据和技能配置</div>
+        <div class="restore-warn" data-i18n="恢复将覆盖本机同名的全局 SKILL">恢复将覆盖本机同名的全局 SKILL</div>
       </div>
       <div class="modal-foot" style="justify-content:flex-end;gap:10px">
         <button class="btn" data-close="modal-restore" data-i18n="取消">取消</button>

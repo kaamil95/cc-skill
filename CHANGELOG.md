@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Tests (`node --test`): unit tests plus integration tests that drive the real IPC handlers with a stubbed `electron` and an in-memory WebDAV server — no network, no real config
 - ESLint (flat config), Prettier and `.editorconfig`, plus a GitHub Actions workflow running lint / format check / tests on `windows-latest`
 - Backups now upload a small `latest.json` metadata sidecar (device, entry count, timestamp, size) next to the zip
+- Backups also upload a per-machine sidecar keyed by a `machineId` generated once per install, so restoring on a machine that has backed up before uses *its own* latest backup instead of whatever was uploaded last; the confirmation dialog shows which of the two it picked
+- The restore dialog now lists the agents found in the backup with their target directories and skill counts, so you can choose which agents to rebuild
+- Restore reports what it deliberately left alone (project skills, unselected agents, unresolvable paths, malformed entries) instead of only counting what it restored
 
 ### Changed
 - All six native `confirm()` dialogs (upload to cloud, delete / uninstall / merge / remove project / reset defaults) replaced by one styled confirmation dialog matching the cloud-restore dialog — and destructive actions now get a red button while non-destructive ones stay neutral
@@ -22,8 +25,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - IPC channel whitelist moved to `ipc-channels.js` as a single source of truth; `main.js` asserts at startup that every registered handler is listed
 - Restoring from the cloud now opens the confirmation dialog immediately and only downloads the backup after you confirm — previously the dialog waited for the full archive to download and unpack
 - `import:inspect` no longer shadows the module-level PowerShell escaping helper
+- Restore now rebuilds **global** skills only: project-level skills travel with their project repo, so they are no longer written out (they were previously dumped into a directory nothing reads) and are reported as skipped instead
+- Backup manifests record skill directories as `~`-relative paths rather than absolute ones, so a backup taken on one machine restores into the correct directory on another
+- Agent directories from a backup are merged into the local config (union) instead of replacing it wholesale, so a machine with customised skill directories no longer has them silently reverted
+- Project entries (names and paths) are now restored only when the backup came from the same machine, matched via the machine id recorded in the manifest — project paths rarely line up across machines, so restoring them elsewhere just produced a list of dead paths to clean up by hand
 
 ### Fixed
+- Automatic backup never ran: the `autoBackup` toggle and its frequency had no effect because nothing ever invoked the check. It now runs once when the window is ready and re-checks every 30 minutes, honouring the startup / daily / weekly setting, and reports the outcome in the UI instead of working silently
+- Automatic backup will not upload the *first* time from a machine until you have backed up manually once. Uploading first would write this machine's sidecar and repoint "which backup do I restore" at the near-empty local state, hiding the older, fuller backup with no way to select it from the UI
+- Restoring on a different machine no longer recreates the uploading machine's directory tree: a path like `C:\Users\alice\.claude\skills` used to be recreated verbatim — and reported as a success — on a machine whose home directory is somewhere else, leaving the skills in a folder no agent reads
+- `toTilde` no longer mistakes a sibling directory for the home directory (`C:\Users\kaix` with home `C:\Users\kai` used to be rewritten to `~/x`, which is irreversible once saved into the config), the home directory itself now collapses to `~` rather than `~/`, and forward-slash paths (`C:/Users/kai/skills`) are recognised as being under the home directory too
+- Restoring a backup made by an older version now works again: those archives record the uploading machine's absolute paths, and restores used to recreate that directory tree verbatim (reporting success) instead of putting the skills where the local agents actually read them. The paths are now matched against the `~`-based agent directories the archive itself declares and mapped onto the local home directory; only paths that cannot be mapped are skipped, and those are reported
+- The cloud retention policy no longer evicts another machine's most recent backup. Machines share one remote folder, so a machine that backs up frequently could otherwise push out the only backup another machine had — silently demoting it to "restore some other machine's snapshot"
+- Directory names inside a backup archive are now validated as single path segments, so a tampered or corrupt manifest can no longer use `..` to delete files outside the destination
 - Restore no longer leaks a `cc-skill-restore-*` temp directory (and a copy of your backup zip) when the confirmation dialog is dismissed
 - Restore temp directories are cleaned up in a `finally`, so failed downloads or invalid archives leave nothing behind
 - Stale `cc-skill-import-*` / `-sync-*` / `-restore-*` working directories left behind by a crash are swept at startup (only ones older than an hour, so an in-flight operation is never touched)

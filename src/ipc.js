@@ -151,8 +151,7 @@ function registerIpcHandlers({ getWindow, appDir, userData }) {
   handle('sync:test', () => webdav.testConnection());
   handle('sync:backup', () => webdav.backup());
   handle('sync:restoreInfo', () => webdav.restoreInfo());
-  handle('sync:restoreApply', ({ name }) => webdav.restoreApply({ name }));
-  handle('sync:autoCheck', () => webdav.autoBackupCheck());
+  handle('sync:restoreApply', ({ name, agentIds }) => webdav.restoreApply({ name, agentIds }));
 
   // ------------------------------ 窗口控制（自绘标题栏）----------------------
   handle('win:minimize', () => {

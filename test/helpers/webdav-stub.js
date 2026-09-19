@@ -9,7 +9,7 @@ class WebdavStub {
     this.log = []; // { method, url }
     this.delayMs = 0; // 人为延迟，用于验证 UI/时序
     this.corruptZip = false; // GET zip 时返回垃圾数据
-    this.hideMeta = false; // GET latest.json 返回 404（模拟旧备份）
+    this.hideMeta = false; // GET 侧车元数据（latest.json / host-*.json）返回 404（模拟旧备份）
     this.server = null;
     this.url = '';
   }
@@ -36,6 +36,20 @@ class WebdavStub {
 
   metaPath() {
     return '/dav/latest.json';
+  }
+
+  /** 本机专属的侧车文件（host-<slug>.json），实际文件名由运行机器的 hostname 决定 */
+  hostMetaPath() {
+    return [...this.files.keys()].find((k) => /\/host-[^/]*\.json$/.test(k)) || null;
+  }
+
+  /** 直接改远端文件内容，用于伪造「别的机器上传的备份」「已被清理的备份」等场景 */
+  writeJson(key, obj) {
+    this.files.set(key, Buffer.from(JSON.stringify(obj), 'utf8'));
+  }
+
+  remove(key) {
+    this.files.delete(key);
   }
 
   zipPath() {
@@ -91,7 +105,7 @@ class WebdavStub {
     }
 
     if (req.method === 'GET' || req.method === 'HEAD') {
-      if (this.hideMeta && key === this.metaPath()) {
+      if (this.hideMeta && (key === this.metaPath() || /\/host-[^/]*\.json$/.test(key))) {
         res.writeHead(404);
         return res.end();
       }

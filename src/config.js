@@ -2,6 +2,7 @@
 // 因此本模块不依赖 electron，测试里可以指向临时目录。
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 const { toTilde, basenameOf } = require('./paths');
 
 // 默认 Agent 注册表：id / 显示名 / 主题色 / 默认技能目录（~ 开头，运行时展开）
@@ -50,13 +51,24 @@ function loadConfig() {
       if (!Array.isArray(config.projects)) config.projects = [];
       config.ui = normalizeUi(config.ui);
       normalizeConfigInPlace();
+      if (ensureMachineId()) saveConfig();
       return;
     }
   } catch (_) {
     /* 首次运行或损坏则重置 */
   }
   config = { agents: JSON.parse(JSON.stringify(DEFAULT_AGENTS)), projects: [], ui: normalizeUi(null) };
+  ensureMachineId();
   saveConfig();
+}
+
+// 本机标识。云备份按「机器维度」存放（见 webdav 的 host-<id>.json 侧车），
+// 拿 hostname 当键的话，两台同名机器（克隆的镜像、同批采购的机器）会互相顶掉对方的备份。
+// 刻意不进 buildConfigPayload —— 它不该随备份跑到别的机器上去。
+function ensureMachineId() {
+  if (config.machineId) return false;
+  config.machineId = crypto.randomUUID();
+  return true;
 }
 
 // 界面偏好：语言 + 弹窗遮罩的毛玻璃强度。越界 / 缺失一律回落到默认值，
@@ -89,6 +101,25 @@ function normalizeConfigInPlace() {
   }
 }
 
+/**
+ * 恢复时按 Agent 合并技能目录：只并入用户勾选要重建的那些 Agent。
+ * 取并集而非整体替换——宁可多出一个界面上可见、可手动删掉的目录，
+ * 也不静默抹掉本机已有的 Agent 配置。
+ */
+function mergeAgentDirs(localAgents, incomingAgents, selectedIds) {
+  const sel = Array.isArray(selectedIds) ? new Set(selectedIds) : null;
+  const out = (localAgents || []).map((a) => ({ ...a, dirs: [...(a.dirs || [])] }));
+  for (const inc of incomingAgents || []) {
+    if (!inc || !inc.id) continue;
+    if (sel && !sel.has(inc.id)) continue;
+    const cur = out.find((a) => a.id === inc.id);
+    const dirs = [...new Set([...(cur ? cur.dirs : []), ...(inc.dirs || [])].map(toTilde).filter(Boolean))];
+    if (cur) cur.dirs = dirs;
+    else out.push({ id: inc.id, name: inc.name || inc.id, color: inc.color, dirs });
+  }
+  return out;
+}
+
 /** 配置导入 / 导出用的载荷（导出时不带 lastBackupAt / lastBackupHash） */
 function buildConfigPayload(includePassword) {
   const w = { ...(config.webdav || {}) };
@@ -115,5 +146,6 @@ module.exports = {
   saveConfig,
   loadConfig,
   normalizeConfigInPlace,
+  mergeAgentDirs,
   buildConfigPayload,
 };

@@ -23,9 +23,9 @@ function writeFlatSkill(parentDir, name) {
   return file;
 }
 
-function makeConfig({ agentDirs = [], projects = [], webdav = null, ui = { lang: 'zh' } } = {}) {
+function makeConfig({ agentDirs = [], agents = null, projects = [], webdav = null, ui = { lang: 'zh' } } = {}) {
   return {
-    agents: [{ id: 'claude-code', name: 'Claude Code', color: '#e07a4f', dirs: agentDirs }],
+    agents: agents || [{ id: 'claude-code', name: 'Claude Code', color: '#e07a4f', dirs: agentDirs }],
     projects,
     ui,
     ...(webdav ? { webdav } : {}),
