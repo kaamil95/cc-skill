@@ -31,8 +31,27 @@ function makeElectronStub({ dataDir, workDir, trashItem }) {
     openPathCalls: [],
     openExternalCalls: [],
     windowOpenHandler: null,
+    reloads: 0,
     backgroundColors: [],
     windowOptions: {},
+    proxyConfigs: [],
+  };
+  const webContents = {
+    on(event, fn) {
+      if (!windowState.listeners.has(event)) windowState.listeners.set(event, []);
+      windowState.listeners.get(event).push(fn);
+    },
+    once(event, fn) {
+      this.on(event, fn);
+    },
+    send() {},
+    setWindowOpenHandler(fn) {
+      windowState.windowOpenHandler = fn;
+    },
+    reload() {
+      windowState.reloads++;
+    },
+    toggleDevTools() {},
   };
   const stub = {
     app: {
@@ -53,16 +72,22 @@ function makeElectronStub({ dataDir, workDir, trashItem }) {
     ipcMain: { handle: (ch, fn) => handlers.set(ch, fn) },
     BrowserWindow: class {
       constructor(opts) {
+        // 构造函数参数也要留档：窗口底色是按主题在创建时定的（见 main.js）
         windowState.windowOptions = opts || {};
-        this.webContents = { on: () => {}, once: () => {}, send: () => {} };
+        this.webContents = webContents;
       }
-      loadFile() {}
+      loadFile(p) {
+        windowState.loadFileCalls.push(p);
+      }
       on() {}
-      isDestroyed() {
-        return false;
+      reload() {
+        windowState.reloads++;
       }
       setBackgroundColor(c) {
         windowState.backgroundColors.push(c);
+      }
+      isDestroyed() {
+        return false;
       }
     },
     Menu: { setApplicationMenu: () => {} },

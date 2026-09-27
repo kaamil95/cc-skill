@@ -18,6 +18,11 @@ const FOLDER_BIG = svgIcon(
 );
 const SEARCH_BIG = svgIcon('<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>', 46, 1.2);
 const CHECK_BIG = svgIcon('<circle cx="12" cy="12" r="9"/><path d="m8.5 12.5 2.5 2.5 5-5.5"/>', 40, 1.4);
+const WARN_BIG = svgIcon(
+  '<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
+  40,
+  1.4
+);
 
 const state = {
   skills: [],
@@ -30,6 +35,8 @@ const state = {
   filter: 'dashboard',
   search: '',
   detail: null,
+  // SKILL 内引用文件的预览栈：每层记下自己的目录，嵌套引用才解析得对
+  refStack: [],
   importSrc: null,
   logs: [],
   unreadErrors: 0,
@@ -148,6 +155,36 @@ window.addEventListener('unhandledrejection', (e) => {
   toast(t('异步操作异常：') + ((r && (r.message || r)) || t('未知错误')), 'err');
 });
 
+// 致命错误兜底：把错误画进主区，并留下「重试 / 打开操作日志」两个出口。
+// 顶栏与侧栏是 index.html 里的静态 DOM，不依赖任何数据，此时依然可点——
+// 这是「出错了不等于什么都做不了」的底线：绝不能让界面停在空壳上。
+function renderFatal(msg, retry) {
+  log(msg, 'err');
+  const grid = $('#grid');
+  if (!grid) return;
+  // 清掉旧数据：否则之后任何一次 renderGrid()（比如在搜索框里打字）会把错误卡冲掉，
+  // 界面悄悄回到一份过期的列表上，用户以为一切都好
+  state.view = [];
+  state.skills = [];
+  const title = $('#main-title');
+  if (title) title.textContent = t('出错了');
+  const hint = $('#main-hint');
+  if (hint) hint.textContent = '';
+  grid.innerHTML = `<div class="empty"><div class="big">${WARN_BIG}</div>${esc(msg)}
+    <div class="dash-actions">
+      <button class="btn primary" id="fatal-retry">${t('重试')}</button>
+      <button class="btn" id="fatal-logs">${t('打开操作日志')}</button>
+    </div>
+  </div>`;
+  const retryBtn = $('#fatal-retry');
+  if (retryBtn) {
+    if (retry) retryBtn.addEventListener('click', retry);
+    else retryBtn.disabled = true;
+  }
+  const logBtn = $('#fatal-logs');
+  if (logBtn) logBtn.addEventListener('click', openLogs);
+}
+
 // ------------------------------ 弹窗 ----------------------------------------
 const openModal = (id) => $('#' + id).classList.remove('hidden');
 const closeModal = (id) => $('#' + id).classList.add('hidden');
@@ -186,16 +223,36 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && !$('#modal-confirm').classList.contains('hidden')) settleConfirm(false);
 });
 $$('[data-close]').forEach((b) => b.addEventListener('click', () => closeModal(b.dataset.close)));
+// 引用弹窗不管怎么关（×、点遮罩、Esc）都要清栈，否则下次从详情点引用会多出一层
+// 指向旧文件的「返回上一份」
+const clearRefStack = () => (state.refStack = []);
 $$('.modal-overlay').forEach((ov) =>
   ov.addEventListener('mousedown', (e) => {
-    if (e.target === ov) ov.classList.add('hidden');
+    if (e.target !== ov) return;
+    ov.classList.add('hidden');
+    if (ov.id === 'modal-ref') clearRefStack();
   })
 );
 
 // ------------------------------ 扫描 / 渲染 ---------------------------------
+// 扫描序号：重叠的两次扫描可能后发先至，用旧结果覆盖新结果（已有的 restoreSeq 是同样的道理）
+let scanSeq = 0;
 async function scan() {
-  const r = await api.invoke('scan');
-  state.skills = r.skills;
+  const seq = ++scanSeq;
+  let r;
+  try {
+    r = await api.invoke('scan');
+  } catch (err) {
+    r = { ok: false, error: String((err && err.message) || err) };
+  }
+  if (seq !== scanSeq) return false; // 期间又发起了一次扫描，这次的结果作废
+  // IPC 层把异常收成 { ok:false }，这里必须显式判断：把 undefined 塞进 state，
+  // 下一步 buildDisplayList 就会抛错，界面停在空壳上——那是另一种白屏。
+  if (!r || !r.ok) {
+    renderFatal(t('扫描失败：') + ((r && r.error) || t('未知错误')), () => scan());
+    return false;
+  }
+  state.skills = r.skills || [];
   state.agents = r.agents;
   state.projects = r.projects || [];
   state.webdav = r.webdav || {};
@@ -676,7 +733,7 @@ function openDetail(s) {
   });
   api.invoke('skill:files', { dir: s.type === 'folder' ? s.absPath : s.parentDir, type: s.type }).then((r) => {
     if (!r.ok || !r.files.length) {
-      $('#detail-files').innerHTML = `<li style="color:var(--muted)">${s.type === 'file' ? t('单文件 SKILL（') + esc(s.folder) + '.md）' : t('空目录')}</li>`;
+      $('#detail-files').innerHTML = `<li style="color:var(--text-3)">${s.type === 'file' ? t('单文件 SKILL（') + esc(s.folder) + '.md）' : t('空目录')}</li>`;
       return;
     }
     $('#detail-files').innerHTML = r.files
@@ -753,9 +810,90 @@ $('#detail-links').addEventListener('click', async (e) => {
   else closeModal('modal-detail');
 });
 
-$$('.tab').forEach((el) =>
+// ------------------------------ SKILL 内的引用链接 ---------------------------
+// markdown 里的相对链接若原样交给浏览器，会按页面基准（renderer/）解析并把整个窗口
+// 导航走——目标不存在时窗口只剩白屏，连自绘标题栏都随 DOM 一起消失。这里全部拦下：
+// 交给主进程按 SKILL 所在目录解析，再决定内嵌预览 / 交系统程序 / 拒绝。
+const refModalOpen = () => !$('#modal-ref').classList.contains('hidden');
+const detailBaseDir = () => {
+  const s = state.detail;
+  if (!s) return '';
+  return s.type === 'folder' ? s.absPath : s.parentDir;
+};
+// 引用弹窗打开时以栈顶目录为基准，嵌套引用才解析得对
+const refBaseDir = () => (refModalOpen() && state.refStack.length ? state.refStack[state.refStack.length - 1].baseDir : detailBaseDir());
+
+document.addEventListener('click', (e) => {
+  const a = e.target.closest('.md a[href]');
+  if (!a) return;
+  e.preventDefault(); // 绝不把导航交给浏览器
+  openMarkdownLink(a.getAttribute('href'));
+});
+
+async function openMarkdownLink(href) {
+  const link = String(href || '').trim();
+  if (!link) return;
+  if (link.startsWith('#')) {
+    const el = document.getElementById(link.slice(1));
+    if (el) el.scrollIntoView({ block: 'start' });
+    return;
+  }
+  const r = await api.invoke('skill:readRef', { baseDir: refBaseDir(), href: link });
+  if (!r || !r.ok) return reportRefFailure(r, link);
+  if (r.kind === 'external') {
+    const o = await api.invoke('shell:openUrl', { url: r.url });
+    if (!o || !o.ok) toast(t('打开链接失败'), 'err');
+    return;
+  }
+  if (r.kind === 'text') return showRef(r);
+  await api.invoke('shell:openPath', { path: r.path });
+  toast(t('已用系统默认程序打开'));
+}
+
+// 失败一律给一句能读懂的话：解析结果里的绝对路径也带出来，方便用户自己去看
+function reportRefFailure(r, href) {
+  const reason = (r && r.reason) || 'error';
+  if (reason === 'outside') return toast(t('该链接指向 SKILL 目录之外，已阻止'), 'err');
+  if (reason === 'scheme') return toast(t('不支持的链接协议，已阻止'), 'err');
+  if (reason === 'directory') {
+    api.invoke('shell:openPath', { path: r.path });
+    return toast(t('这是一个目录，已用系统默认程序打开'));
+  }
+  if (reason === 'missing') return toast(t('引用的文件不存在：') + shortPath(r.path || href), 'err');
+  toast(t('读取引用失败：') + ((r && r.error) || href), 'err');
+}
+
+// 引用预览：栈里连内容一起存下，「返回」就是纯重绘，不再走一次 IPC
+function showRef(r) {
+  const name = String(r.path).split(/[\\/]/).filter(Boolean).pop() || r.path;
+  state.refStack.push({ baseDir: String(r.path).replace(/[\\/][^\\/]*$/, ''), path: r.path, name, body: r.body || '' });
+  renderRef();
+  openModal('modal-ref');
+}
+
+function renderRef() {
+  const top = state.refStack[state.refStack.length - 1];
+  if (!top) return closeModal('modal-ref');
+  $('#ref-title').textContent = top.name;
+  $('#ref-path').textContent = shortPath(top.path);
+  $('#ref-md').innerHTML = api.md(top.body);
+  $('#btn-ref-back').classList.toggle('hidden', state.refStack.length <= 1);
+  $('#btn-ref-open').onclick = () => api.invoke('shell:openPath', { path: top.path });
+}
+
+$('#btn-ref-back').addEventListener('click', () => {
+  state.refStack.pop();
+  renderRef();
+});
+// 关掉引用弹窗就把栈清空，免得下次从别的 SKILL 点链接时用错基准目录
+$$('#modal-ref [data-close]').forEach((b) => b.addEventListener('click', () => (state.refStack = [])));
+
+// 详情弹窗的页签处理器：选择器必须限定在 #modal-detail 内。
+// 市场弹窗的来源页签也用 .tab 类，全局选择器会把它们一起绑上，点一下就走 el.dataset.tab
+// （市场页签上这个值是 undefined），拼出来的选择器匹配不到元素，于是每次点击抛一次 TypeError。
+$$('#modal-detail .tab').forEach((el) =>
   el.addEventListener('click', () => {
-    $$('.tab').forEach((x) => x.classList.toggle('active', x === el));
+    $$('#modal-detail .tab').forEach((x) => x.classList.toggle('active', x === el));
     ['preview', 'edit', 'files', 'links'].forEach((p2) => $('#panel-' + p2).classList.add('hidden'));
     $('#panel-' + el.dataset.tab).classList.remove('hidden');
   })
@@ -1545,15 +1683,31 @@ api.onSyncAuto?.((r) => {
 });
 
 (async () => {
-  i18n.apply(document);
-  const p = await api.invoke('app:paths');
-  state.HOME = p.home || '';
-  state.logFile = p.logFile || '';
-  state.ui = p.ui || { lang: 'auto' };
-  // 让样式表知道平台：macOS 用系统红绿灯，需要隐藏自绘窗口按钮并给左上角留位
-  document.body.dataset.platform = p.platform || '';
-  applyOverlay(state.ui);
-  i18n.setLang(state.ui.lang || 'auto');
-  i18n.apply(document);
-  await scan();
+  // 先置位再干活：boot-guard 只需要知道「app.js 跑起来了」，不能等首次扫描——
+  // 目录多的时候扫描可能超过它的 6 秒，那会误报「界面初始化失败」
+  window.__appBooted = true;
+  try {
+    i18n.apply(document);
+    const p = await api.invoke('app:paths');
+    state.HOME = p.home || '';
+    state.logFile = p.logFile || '';
+    state.ui = p.ui || { lang: 'auto' };
+    state.proxy = p.proxy || state.proxy;
+    state.marketCfg = p.market || state.marketCfg;
+    // 让样式表知道平台：macOS 用系统红绿灯，需要隐藏自绘窗口按钮并给左上角留位
+    document.body.dataset.platform = p.platform || '';
+    applyOverlay(state.ui);
+    // 配置里的主题是权威值：覆盖掉 theme.js 启动时用的缓存，并把缓存刷新成它
+    applyTheme(state.ui);
+    theme.cache(state.ui);
+    i18n.setLang(state.ui.lang || 'auto');
+    i18n.apply(document);
+    await scan();
+  } catch (err) {
+    // 启动阶段任何异常都必须落到可见的错误态上：静默留白等于让用户无路可走
+    renderFatal(t('界面初始化失败：') + String((err && err.message) || err), () => location.reload());
+  } finally {
+    // boot-guard.js 据此判断界面是否已经起来了
+    window.__appReady = true;
+  }
 })();
