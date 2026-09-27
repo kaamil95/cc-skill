@@ -8,6 +8,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Themes** (Settings → Theme): four palettes — Light, Dark, Sepia, High contrast — plus a freely chosen accent color. Every color in the stylesheet is now a variable, so a theme can no longer leave a hard-coded `#fff` glowing on a dark background; the accent's tints are derived from a single `--accent` via `color-mix`, and the last choice is cached in `localStorage` so it is applied before the first paint
+- **Discover SKILLs** — install skills from the outside world: search GitHub repositories, paste a repo / subdirectory / direct zip link, or point it at a JSON index. It downloads the archive, unpacks it, lists every SKILL it contains (with a preview of each `SKILL.md`), and installs the ones you tick into any agent directory — reusing the same copy/link pipeline as the local import. Installing third-party skills is always preceded by a confirmation that names the source and warns that a SKILL's instructions and scripts are read — and may be executed — by your agents
+- **Network proxy** (Settings → Network proxy): Follow system / Direct / Manual, the last with `http://user:pass@host:port` and a bypass list, plus a connection test. Applied through Electron's session, so WebDAV sync and the market both honour it; a manually configured proxy that requires authentication is answered via the app `login` event. The proxy config is machine-local and never uploaded with a backup
+- Error resilience for the window itself: navigation guards (a relative link inside a SKILL preview used to navigate the whole window away and leave a blank screen), automatic recovery from a failed page load or a crashed renderer, `F5` / `Ctrl+R` reload and `Ctrl+Shift+I` devtools in a menu-less window, a boot guard that shows a reload button if the UI never comes up, and a fatal-error card with retry instead of an empty shell
+- `src/net.js`: an injectable HTTP layer with timeouts and a download size cap; the main process injects Electron's `net.fetch` (which honours the session proxy), tests inject a fake
+- `src/market.js`, `src/nav.js`, `src/applog.js`: link/repo parsing, index normalisation, archive retrieval and SKILL enumeration; navigation classification; a shared log-line writer
+
+### Changed
+- Dashboard and skill cards reworked: the action row that duplicated the toolbar is gone, the overview is a single grouped container instead of nested cards, skill cards reveal their path and actions on hover, and the content column is capped at 1180px
+- `src/webdav.js` now sends its requests through the injectable HTTP layer instead of the global `fetch` — the global one ignores the proxy entirely, which made a configured proxy a no-op
+- The window background follows the configured theme, both at creation (the main process reads the config first) and live via a new `win:setBackground` channel
+
+### Fixed
+- A failed `scan()` left the UI on an empty shell (the IPC layer returns `{ok:false}` and the renderer stored `undefined`); failures now render an error card with a retry button
+- A missing generic `.hidden` rule meant elements carrying the class stayed visible — the market dialog's three source panes all showed at once
+- The confirmation dialog could be stacked underneath a later dialog in the DOM, making its buttons unclickable
+- Clicking a skill in the market preview passed a directory to `skill:read`, which reported `EISDIR`
+
 - macOS support: junction links become symlinks, zip packing via native zip/unzip, traffic-light buttons adapted
 - UI i18n (Simplified Chinese / English), defaults to the system language, switchable in Settings
 - **Adjustable dialog backdrop** (Settings → Dialog backdrop): two sliders for the blur radius and the dim level behind dialogs, previewed live and persisted in the config
