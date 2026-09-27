@@ -10,6 +10,7 @@ const {
   normalizeProxy,
   proxyToSessionConfig,
   proxyCredentials,
+  normalizeMarket,
   redactProxyUrl,
 } = require('../../src/config');
 
@@ -130,3 +131,10 @@ test('代理地址落日志前抹掉凭据（明文密码不该写进 cc-skill.l
   assert.equal(redactProxyUrl(''), '');
 });
 
+// ------------------------------ 市场 ----------------------------------------
+test('市场配置：索引地址必须是 http(s)，token 去空白', () => {
+  assert.deepEqual(normalizeMarket(null), { indexUrl: '', token: '' });
+  assert.equal(normalizeMarket({ indexUrl: 'https://e.test/i.json' }).indexUrl, 'https://e.test/i.json');
+  assert.equal(normalizeMarket({ indexUrl: 'file:///tmp/i.json' }).indexUrl, '');
+  assert.equal(normalizeMarket({ token: '  ghp_x  ' }).token, 'ghp_x');
+});

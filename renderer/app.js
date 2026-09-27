@@ -46,6 +46,10 @@ const state = {
   editingAgents: null,
   editingProjects: null,
   ui: { lang: 'auto' },
+  proxy: { mode: 'system', url: '', bypass: '' },
+  marketCfg: { indexUrl: '', token: '' },
+  // 发现弹窗的工作状态：来源页签 / 结果 / 已取回的 SKILL / 勾选集合 / 当前预览项
+  market: { src: 'github', skills: [], selected: new Set(), active: null },
   logFile: '',
 };
 
@@ -1687,6 +1691,8 @@ $('#btn-clear-logs').addEventListener('click', () => {
 // 侧栏静态导航项（总览）在这里绑定；Agent/项目 列表在各自渲染函数中绑定
 $$('#sidebar > .nav-item').forEach((el) => el.addEventListener('click', () => setFilter(el.dataset.filter)));
 
+$('#btn-market').addEventListener('click', openMarket);
+
 $('#btn-import').addEventListener('click', () => {
   state.importSrc = null;
   $('#import-preview').classList.add('hidden');
@@ -1705,7 +1711,293 @@ document.addEventListener('keydown', (e) => {
     e.preventDefault();
     $('#search').focus();
   }
-  if (e.key === 'Escape') $$('.modal-overlay').forEach((ov) => ov.classList.add('hidden'));
+  if (e.key === 'Escape') {
+    $$('.modal-overlay').forEach((ov) => ov.classList.add('hidden'));
+    clearRefStack();
+  }
+});
+
+// ------------------------------ 发现 SKILL（市场） ---------------------------
+// 两步：先「找」（GitHub 搜索 / 粘链接 / 索引源），再「装」（列出该来源里的 SKILL、
+// 勾选、预览、选目标目录）。搜索与下载都在主进程做，所以走的是同一套代理配置。
+const mkStatus = (s) => ($('#mk-status').textContent = s || '');
+
+function showMkStep(step) {
+  $('#mk-find').classList.toggle('hidden', step !== 'find');
+  $('#mk-pick').classList.toggle('hidden', step !== 'pick');
+  $('#mk-install').classList.toggle('hidden', step !== 'pick');
+}
+
+function openMarket() {
+  state.market = { src: 'github', skills: [], selected: new Set(), active: null };
+  $('#mk-query').value = '';
+  $('#mk-url').value = '';
+  $('#mk-index').value = (state.marketCfg && state.marketCfg.indexUrl) || '';
+  $('#mk-token').value = (state.marketCfg && state.marketCfg.token) || '';
+  $('#mk-results').innerHTML = '';
+  $('#mk-preview').innerHTML = '';
+  $('#mk-list').innerHTML = '';
+  $('#mk-source').textContent = '';
+  mkStatus('');
+  selectMkSource('github');
+  showMkStep('find');
+  fillTargetSelect($('#mk-target'));
+  openModal('modal-market');
+}
+
+function selectMkSource(src) {
+  state.market.src = src;
+  $$('#mk-tabs .tab').forEach((b) => b.classList.toggle('active', b.dataset.mkSrc === src));
+  ['github', 'url', 'index'].forEach((s) => $('#mk-pane-' + s).classList.toggle('hidden', s !== src));
+  // Token 只对 GitHub 相关来源有意义
+  $('#mk-token').style.display = src === 'github' ? '' : 'none';
+  mkStatus('');
+}
+
+$('#mk-tabs').addEventListener('click', (e) => {
+  const btn = e.target.closest('.tab');
+  if (btn) selectMkSource(btn.dataset.mkSrc);
+});
+
+// 索引地址与 token 都是「填了就该记住」的东西，失焦即存，不用额外点保存
+const saveMarketCfg = async () => {
+  const r = await api.invoke('market:setConfig', { indexUrl: $('#mk-index').value.trim(), token: $('#mk-token').value.trim() });
+  if (r.ok) state.marketCfg = r.market;
+};
+$('#mk-index').addEventListener('blur', saveMarketCfg);
+$('#mk-token').addEventListener('blur', saveMarketCfg);
+
+// 网络类失败给一条出路：直接把用户送到代理设置（市场连不上，十有八九是代理没配）
+function mkFail(r) {
+  mkStatus('');
+  const err = (r && r.error) || t('未知错误');
+  const netish = /超时|HTTP (4\d\d|5\d\d)|fetch failed|ENOTFOUND|ECONN|network|SSL|socket/i.test(err);
+  const hint = /403/.test(err) ? t('可能是 GitHub 匿名额度用尽（每小时 60 次），填个 Token 再试。') : '';
+  $('#mk-results').innerHTML = `<div class="mk-empty">${esc(t('失败：') + err)}${hint ? '<br>' + esc(hint) : ''}
+    ${netish ? `<br><button class="btn sm" id="mk-fix-proxy">${t('检查代理设置')}</button>` : ''}</div>`;
+  const btn = $('#mk-fix-proxy');
+  if (btn) {
+    btn.addEventListener('click', () => {
+      closeModal('modal-market');
+      openSettings();
+      setTimeout(() => $('#px-mode').focus(), 60);
+    });
+  }
+}
+
+function renderMkRepos(items, total) {
+  mkStatus(total ? tf('共 {n} 个仓库，按 star 排序；点一个查看其中的 SKILL', { n: total }) : '');
+  const box = $('#mk-results');
+  if (!items.length) {
+    box.innerHTML = `<div class="mk-empty">${t('没有找到仓库。<br>换个关键词，或改用「粘贴链接」直接给仓库地址。')}</div>`;
+    return;
+  }
+  box.innerHTML = items
+    .map(
+      (it) => `<div class="mk-repo" data-owner="${esc(it.owner)}" data-repo="${esc(it.repo)}">
+      <div class="mk-repo-name">${esc(it.fullName)}${it.stars ? `<span class="chip">★ ${it.stars}</span>` : ''}</div>
+      <div class="mk-repo-desc">${esc(it.description) || t('（无描述）')}</div>
+      <div class="mk-repo-meta">${it.updatedAt ? `<span>${t('最近更新')} ${esc(String(it.updatedAt).slice(0, 10))}</span>` : ''}</div>
+    </div>`
+    )
+    .join('');
+}
+
+async function mkSearchGithub() {
+  const query = $('#mk-query').value.trim();
+  if (!query) return;
+  await saveMarketCfg();
+  mkStatus(t('搜索中…'));
+  $('#mk-results').innerHTML = '';
+  const r = await api.invoke('market:search', { query });
+  if (!r.ok) return mkFail(r);
+  renderMkRepos(r.items, r.total);
+}
+
+async function mkLoadIndex() {
+  const url = $('#mk-index').value.trim();
+  if (!url) return toast(t('请先填写索引地址'), 'err');
+  await saveMarketCfg();
+  mkStatus(t('加载索引中…'));
+  $('#mk-results').innerHTML = '';
+  const r = await api.invoke('market:index', { url });
+  if (!r.ok) return mkFail(r);
+  mkStatus(r.name ? tf('索引「{name}」', { name: r.name }) + (r.skipped ? tf('（跳过 {n} 条无效记录）', { n: r.skipped }) : '') : '');
+  const box = $('#mk-results');
+  if (!r.items.length) {
+    box.innerHTML = `<div class="mk-empty">${t('索引里没有可用的条目。')}</div>`;
+    return;
+  }
+  box.innerHTML = r.items
+    .map(
+      (it, i) => `<div class="mk-repo mk-index-item" data-i="${i}">
+      <div class="mk-repo-name">${esc(it.name)}${(it.tags || []).map((tg) => `<span class="chip">${esc(tg)}</span>`).join('')}</div>
+      <div class="mk-repo-desc">${esc(it.description) || t('（无描述）')}</div>
+      <div class="mk-repo-meta"><span>${esc(it.source.kind === 'github' ? `${it.source.owner}/${it.source.repo}${it.source.path ? '/' + it.source.path : ''}` : it.source.url)}</span></div>
+    </div>`
+    )
+    .join('');
+  state.market.indexItems = r.items;
+}
+
+// 选中一个来源（仓库 / 索引条目 / 粘贴的链接）→ 下载解压 → 列出其中的 SKILL。
+// payload 直接交给主进程：链接怎么解析只在 src/market.js 里有一份实现
+async function mkInspect(payload, label) {
+  mkStatus(t('下载并解压中…（仓库大时会久一点）'));
+  const r = await api.invoke('market:inspect', payload);
+  if (!r.ok) return mkFail(r);
+  state.market.skills = r.skills || [];
+  // 默认全选：用户是冲着这个来源点进来的，一个个勾太啰嗦；底部会显示已选数量
+  state.market.selected = new Set(state.market.skills.map((s) => s.absPath));
+  state.market.active = null;
+  $('#mk-source').textContent = label || r.label || '';
+  $('#mk-preview').innerHTML = '';
+  showMkStep('pick');
+  renderMkList();
+  mkStatus(state.market.skills.length ? tf('共 {n} 个 SKILL，默认全选', { n: state.market.skills.length }) : '');
+}
+
+function renderMkList() {
+  // 只按名字比对：本机可能有别的 Agent 下的同名 SKILL，未必是同一个，所以徽章写「同名」
+  // 而不是「已安装」——后者会让人以为装过了、从而跳过安装
+  const sameName = new Set(state.skills.map((s) => s.name));
+  const list = $('#mk-list');
+  if (!state.market.skills.length) {
+    list.innerHTML = `<li class="mk-empty">${t('这个来源里没有找到 SKILL.md。')}</li>`;
+    updateMkInstall();
+    return;
+  }
+  list.innerHTML = state.market.skills
+    .map(
+      (s) => `<li class="mk-item" data-path="${esc(s.absPath)}">
+      <input type="checkbox" ${state.market.selected.has(s.absPath) ? 'checked' : ''} />
+      <div class="mk-item-main">
+        <div class="mk-item-name">${esc(s.name)}${sameName.has(s.name) ? `<span class="chip" title="${t('本机已有同名 SKILL，不一定是同一个')}">${t('同名已存在')}</span>` : ''}</div>
+        <div class="mk-item-desc" title="${esc(s.description)}">${esc(s.description) || t('（无描述）')} · ${s.fileCount} ${t('个文件')}</div>
+      </div>
+    </li>`
+    )
+    .join('');
+  updateMkInstall();
+}
+
+function updateMkInstall() {
+  const n = state.market.selected.size;
+  const btn = $('#mk-install');
+  btn.disabled = n === 0;
+  btn.textContent = n ? tf('安装选中的 {n} 个', { n }) : t('安装选中的 SKILL');
+}
+
+async function mkPreview(skill) {
+  const box = $('#mk-preview');
+  box.innerHTML = `<div class="hint">${t('读取中…')}</div>`;
+  const r = await api.invoke('skill:read', { path: skill.skillMdPath });
+  box.innerHTML = r.ok ? api.md(r.body) : `<div class="hint">${t('读取失败：')}${esc(r.error || '')}</div>`;
+}
+
+$('#mk-list').addEventListener('click', (e) => {
+  const li = e.target.closest('.mk-item');
+  if (!li) return;
+  const p = li.dataset.path;
+  // 勾选框只管勾选，点行本身只看预览——两个动作别混在一起
+  if (e.target.tagName === 'INPUT') {
+    if (e.target.checked) state.market.selected.add(p);
+    else state.market.selected.delete(p);
+    updateMkInstall();
+    return;
+  }
+  $$('#mk-list .mk-item').forEach((el) => el.classList.toggle('active', el === li));
+  const skill = state.market.skills.find((s) => s.absPath === p);
+  if (skill) mkPreview(skill);
+});
+
+$('#mk-results').addEventListener('click', (e) => {
+  const repo = e.target.closest('.mk-repo:not(.mk-index-item)');
+  if (repo) {
+    const owner = repo.dataset.owner;
+    const name = repo.dataset.repo;
+    return mkInspect({ source: { kind: 'github', owner, repo: name, ref: '' } }, owner + '/' + name);
+  }
+  const idx = e.target.closest('.mk-index-item');
+  if (idx) {
+    const entry = (state.market.indexItems || [])[Number(idx.dataset.i)];
+    if (entry) mkInspect({ source: entry.source }, entry.name);
+  }
+});
+
+$('#mk-go').addEventListener('click', mkSearchGithub);
+$('#mk-query').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') mkSearchGithub();
+});
+$('#mk-go-index').addEventListener('click', mkLoadIndex);
+$('#mk-index').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') mkLoadIndex();
+});
+$('#mk-go-url').addEventListener('click', () => {
+  const raw = $('#mk-url').value.trim();
+  if (!raw) return;
+  // 不在渲染层解析：认不出来的地址由主进程给出统一的错误，避免两份解析器漂移
+  mkInspect({ raw }, raw);
+});
+$('#mk-url').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') $('#mk-go-url').click();
+});
+$('#mk-back').addEventListener('click', () => {
+  showMkStep('find');
+  mkStatus('');
+});
+
+$('#mk-install').addEventListener('click', async () => {
+  const destDir = $('#mk-target').value;
+  if (!destDir) return toast(t('请先选择安装位置'), 'err');
+  const picked = state.market.skills.filter((s) => state.market.selected.has(s.absPath));
+  if (!picked.length) return;
+  // 装的是别人写的 SKILL：说明与脚本会被 AI 助手读取，这一步必须让人明确确认
+  const okGo = await confirmModal({
+    title: t('安装 SKILL'),
+    message: tf('把 {n} 个 SKILL 从「{src}」复制到：\n{dest}\n\nSKILL 里的说明与脚本会被 AI 助手读取并可能执行，请确认来源可信。', {
+      n: picked.length,
+      src: $('#mk-source').textContent || '',
+      dest: destDir,
+    }),
+    confirmLabel: t('安装'),
+  });
+  if (!okGo) return;
+
+  // 安装期间禁掉按钮：连点会各跑一遍循环，配合 onConflict:'rename' 装出 foo-2、foo-3
+  const btn = $('#mk-install');
+  btn.disabled = true;
+  mkStatus(t('安装中…'));
+  let done = 0;
+  const failed = [];
+  try {
+    for (const s of picked) {
+      const folder =
+        String(s.relPath || '')
+          .split('/')
+          .filter(Boolean)
+          .pop() || s.name;
+      const r = await api.invoke('skill:copy', { srcPath: s.absPath, type: 'folder', destDir, folderName: folder, onConflict: 'rename' });
+      if (r.ok) done++;
+      else failed.push(`${s.name}：${r.error || r.reason || ''}`);
+    }
+  } finally {
+    btn.disabled = false;
+    updateMkInstall();
+  }
+  await scan();
+  if (failed.length) {
+    mkStatus('');
+    toast(tf('已安装 {n} 个，{m} 个失败', { n: done, m: failed.length }), 'err');
+    failed.slice(0, 3).forEach((f) => log(t('安装失败：') + f, 'err'));
+    return;
+  }
+  toast(tf('已安装 {n} 个 SKILL ✓', { n: done }), 'ok');
+  closeModal('modal-market');
+  if (isProjectTarget(destDir)) {
+    const proj = state.projects.find((p) => destDir.startsWith(p.dir));
+    if (proj) setFilter('project:' + proj.id);
+  }
 });
 
 // ------------------------------ 启动 -----------------------------------------

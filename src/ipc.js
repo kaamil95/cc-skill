@@ -10,6 +10,7 @@ const { resolveRef } = require('./nav');
 const { logLine } = require('./applog');
 const { DEFAULT_AGENTS, getConfig, saveConfig, normalizeConfigInPlace, normalizeUi, normalizeProxy, normalizeMarket, themeBg } = require('./config');
 const { httpGet } = require('./net');
+const market = require('./market');
 const {
   parseFrontmatter,
   firstParagraph,
@@ -157,6 +158,7 @@ function registerIpcHandlers({ getWindow, appDir, userData, applyProxy }) {
     // 归一化后再下发：渲染层拿到的永远是完整对象，不会因为某个字段缺失而算出 0
     ui: normalizeUi(getConfig().ui),
     proxy: normalizeProxy(getConfig().proxy),
+    market: normalizeMarket(getConfig().market),
     // 渲染层据此调整自绘标题栏：macOS 用系统原生红绿灯，不再画一套自己的窗口按钮
     platform: process.platform,
   }));
@@ -201,6 +203,21 @@ function registerIpcHandlers({ getWindow, appDir, userData, applyProxy }) {
       await apply(saved);
     }
   });
+
+  // ------------------------------ SKILL 市场 ----------------------------------
+  // 搜索/索引/取回都在主进程做：渲染层不该直接发网络请求，也免得绕开代理配置
+  const token = () => normalizeMarket(getConfig().market).token;
+
+  handle('market:setConfig', ({ indexUrl, token: tk }) => {
+    const config = getConfig();
+    config.market = normalizeMarket({ ...config.market, ...(indexUrl !== undefined ? { indexUrl } : {}), ...(tk !== undefined ? { token: tk } : {}) });
+    saveConfig();
+    return { ok: true, market: config.market };
+  });
+  handle('market:search', ({ query, page }) => market.searchGithub(query, { token: token(), page }));
+  handle('market:index', ({ url }) => market.fetchIndex(url || normalizeMarket(getConfig().market).indexUrl, { token: token() }));
+  // 链接解析只在主进程做一处（src/market.js 的 parseSource）：渲染层再写一份必然会与它漂移
+  handle('market:inspect', ({ source, raw }) => market.inspectSource(source || market.parseSource(raw), { token: token() }));
 
   // ------------------------------ 窗口控制（自绘标题栏）----------------------
   handle('win:minimize', () => {

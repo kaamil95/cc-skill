@@ -148,6 +148,15 @@ function redactProxyUrl(url) {
   }
 }
 
+// 市场：索引源地址与 GitHub token。同样是本机配置——token 是凭据，不该跟着备份走。
+function normalizeMarket(m) {
+  const indexUrl = m && typeof m.indexUrl === 'string' ? m.indexUrl.trim() : '';
+  return {
+    indexUrl: /^https?:\/\//i.test(indexUrl) ? indexUrl : '',
+    token: m && typeof m.token === 'string' ? m.token.trim() : '',
+  };
+}
+
 function normalizeUi(ui) {
   const clamp = (v, [lo, hi], dflt) => {
     // 注意 Number(null) === 0：空值必须先单独挡掉，否则「没配」会被当成「配成 0」
@@ -171,6 +180,9 @@ function normalizeConfigInPlace() {
   for (const a of config.agents || []) {
     a.dirs = (a.dirs || []).map(toTilde).filter(Boolean);
   }
+  // 代理与市场配置同样是「手改 config.json 也不该把界面/网络搞坏」的那类字段
+  config.proxy = normalizeProxy(config.proxy);
+  config.market = normalizeMarket(config.market);
   for (const p of config.projects || []) {
     p.dir = toTilde(String(p.dir || '').trim());
     if (!p.name || /[\\/]/.test(p.name)) p.name = basenameOf(p.dir);
@@ -224,6 +236,7 @@ module.exports = {
   proxyToSessionConfig,
   proxyCredentials,
   redactProxyUrl,
+  normalizeMarket,
   normalizeUi,
   initConfig,
   getConfig,
