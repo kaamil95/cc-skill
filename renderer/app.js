@@ -262,6 +262,7 @@ async function scan() {
   renderSidebar();
   renderGrid();
   updateDupsButton();
+  return true;
 }
 
 function buildDisplayList() {
@@ -302,9 +303,9 @@ function renderSidebar() {
         <span class="nav-icon">＋</span>
         <span class="nav-name">${t('添加 Agent')}</span>
       </div>`;
-  $('#sidebar-foot').innerHTML = tf('{gn} 个 SKILL · {dn} 个 SKILL 目录 · {pn} 个项目', {
+  // 只留两项：SKILL 目录数在主区概览里已有，侧栏再报一遍是重复信息
+  $('#sidebar-foot').innerHTML = tf('{gn} 个 SKILL · {pn} 个项目', {
     gn: state.view.length,
-    dn: state.agents.reduce((n, a) => n + (a.dirs || []).length, 0),
     pn: state.projects.length,
   });
   $$('#agent-nav .nav-item:not(.nav-add)').forEach((el) => el.addEventListener('click', () => setFilter(el.dataset.filter)));
@@ -411,13 +412,12 @@ function setFilter(f) {
 
 // ------------------------------ 卡片 / 网格 ---------------------------------
 function cardHTML(s) {
+  // Agent 芯片最多显示 3 个，多的折成 +N：卡片一行放不下 7 个芯片，挤起来只会换行把高度搞乱
+  const agents = s.allAgentIds.map(agentById).filter(Boolean);
+  const shown = agents.slice(0, 3);
   const chips = (s.project ? [`<span class="chip proj-chip" title="${esc(t('项目 SKILL') + ' · ' + s.project.name)}">${esc(s.project.name)}</span>`] : [])
-    .concat(
-      s.allAgentIds.map((id) => {
-        const a = agentById(id);
-        return a ? `<span class="chip"><span class="dot" style="background:${esc(a.color)}"></span>${esc(a.name)}</span>` : '';
-      })
-    )
+    .concat(shown.map((a) => `<span class="chip"><span class="dot" style="background:${esc(a.color)}"></span>${esc(a.name)}</span>`))
+    .concat(agents.length > shown.length ? [`<span class="chip">+${agents.length - shown.length}</span>`] : [])
     .join('');
   const type = s.type === 'file' ? `<span class="card-type">${t('单文件')}</span>` : '';
   const linkBadge = s.dangling
@@ -432,14 +432,15 @@ function cardHTML(s) {
   const pathTip = s.linked ? s.linkTarget || s.absPath : s.absPath;
   return `<div class="card" data-key="${esc(s.key)}">
     <div class="card-top">
-      <div class="card-name">${esc(s.name)}${type}${linkBadge}</div>
+      <div class="card-name">${esc(s.name)}</div>
+      <div class="card-badges">${type}${linkBadge}</div>
     </div>
     <div class="card-desc" title="${esc(s.description)}">${esc(s.description) || '<span style="opacity:.55">' + t('（无描述）') + '</span>'}</div>
+    <div class="card-path" title="${esc(pathTip)}">${esc(pathText)}</div>
     <div class="card-foot">
-      <div style="display:flex;gap:5px;overflow:hidden">${chips}</div>
-      <span class="card-path" title="${esc(pathTip)}">${esc(pathText)}</span>
+      <div class="card-chips">${chips}</div>
       <div class="card-actions">
-        <button class="btn sm act-copy" title="${t('安装到其他 Agent（复制副本或创建链接）')}">${t('安装到…')}</button>
+        <button class="btn sm act-copy" title="${t('安装到其他 Agent（复制副本或创建链接）')}">${t('安装')}</button>
         <button class="btn sm danger act-del" title="${t('删除（移入回收站）')}">${t('删除')}</button>
       </div>
     </div>
@@ -621,7 +622,7 @@ function renderDashboard() {
     : '<div class="hint" style="padding:8px 2px">' + t('还没有添加项目，点击左侧栏「＋ 添加项目」。') + '</div>';
   const logRows = state.logs.length
     ? state.logs
-        .slice(0, 6)
+        .slice(0, 3)
         .map(
           (e) => `<div class="dash-row">
             <span class="log-time">${e.time.toLocaleTimeString('zh-CN', { hour12: false })}</span>
@@ -643,52 +644,50 @@ function renderDashboard() {
     .filter((sec) => sec.items.length);
 
   $('#main-hint').textContent = '';
-  $('#grid').innerHTML = `
-    <div class="stat-grid">
-      ${tiles.map((tl) => `<div class="stat-tile"><div class="stat-n ${tl.warn ? 'warn' : ''}">${tl.n}</div><div class="stat-label">${tl.label}</div></div>`).join('')}
-    </div>
-    <div class="dash-actions">
-      <button class="btn" id="dash-rescan">${t('⟳ 重新扫描')}</button>
-      <button class="btn tinted" id="dash-dups">${t('合并重复')}</button>
-      <button class="btn" id="dash-new">${t('＋ 新建 SKILL')}</button>
-      <button class="btn" id="dash-import">${t('导入 SKILL')}</button>
-    </div>
-    <div class="dash-cols">
-      <div class="agent-block">
-        <div class="dash-sec">${t('AGENT 分布')}</div>
-        ${agentRows || '<div class="hint">' + t('无') + '</div>'}
+  // 概览是一张分组容器里的三段（指标 / 分布 / 动态），靠细分隔线分节。
+  // 早先是 6 张独立卡 + 一层嵌套白块 + 一行与顶栏重复的动作按钮，层次全靠阴影堆。
+  const overview = `
+    <section class="overview">
+      <div class="ov-stats">
+        ${tiles
+          .map(
+            (tl) =>
+              `<div class="ov-stat"><div class="ov-n ${tl.warn ? 'warn' : ''}${tl.n ? '' : ' zero'}">${tl.n}</div><div class="ov-label">${tl.label}</div></div>`
+          )
+          .join('')}
       </div>
-      <div class="agent-block">
-        <div class="dash-sec">${t('项目分布')}</div>
-        ${projRows}
+      <div class="ov-cols">
+        <div class="ov-col">
+          <div class="ov-sec">${t('AGENT 分布')}</div>
+          ${agentRows || '<div class="hint">' + t('无') + '</div>'}
+        </div>
+        <div class="ov-col">
+          <div class="ov-sec">${t('项目分布')}</div>
+          ${projRows}
+        </div>
       </div>
-    </div>
-    <div class="agent-block">
-      <div class="dash-sec">${t('最近动态')} <span class="hint">（${tf('共 {n} 条', { n: state.logs.length })}，${t('详见操作日志')}）</span></div>
-      ${logRows}
-    </div>
-    ${dangling ? `<div class="link-hint warn">${tf('⚠ 检测到 {n} 个失效链接（源已被删除），可在列表中筛选清理。', { n: dangling })}</div>` : ''}
-    ${sections
+      <div class="ov-activity">
+        <div class="ov-sec">${t('最近动态')} <span class="hint">（${tf('共 {n} 条', { n: state.logs.length })}，${t('详见操作日志')}）</span></div>
+        ${logRows}
+      </div>
+    </section>`;
+  $('#grid').innerHTML =
+    overview +
+    (dangling ? `<div class="link-hint warn">${tf('⚠ 检测到 {n} 个失效链接（源已被删除），可在列表中筛选清理。', { n: dangling })}</div>` : '') +
+    sections
       .map(
         (sec) => `
       <div class="section-head"><h3>${esc(sec.title)}</h3>${sec.tag ? `<span class="chip proj-chip">${esc(sec.tag)}</span>` : ''}<span class="hint">${tf('{n} 个', { n: sec.items.length })}</span></div>
       <div class="grid">${sec.items.map(cardHTML).join('')}</div>`
       )
-      .join('')}
-  `;
+      .join('');
   bindCards();
-  $('#dash-rescan').addEventListener('click', () => {
-    scan();
-    toast(t('已重新扫描'));
-  });
-  $('#dash-dups').addEventListener('click', openDupsModal);
-  $('#dash-new').addEventListener('click', openNewModal);
-  $('#dash-import').addEventListener('click', () => $('#btn-import').click());
 }
 
 // ------------------------------ 详情 ----------------------------------------
 function openDetail(s) {
   state.detail = s;
+  state.refStack = [];
   $('#detail-title').textContent = s.name;
   const chips = (s.project ? [`<span class="chip proj-chip">${esc(s.project.name)}</span>`] : [])
     .concat(
@@ -1025,6 +1024,8 @@ function buildDupGroups() {
 
 function updateDupsButton() {
   const n = buildDupGroups().length;
+  // 没有重复项时按钮直接退场：工具栏上不该常驻一个永远是 0 的入口
+  $('#btn-dups').classList.toggle('hidden', n === 0);
   $('#dups-label').textContent = n ? tf('合并重复 ({n})', { n }) : t('合并重复');
 }
 

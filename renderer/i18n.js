@@ -341,7 +341,7 @@
 
     // ---- 本次补齐 ----
     '还没有添加项目，点击左侧栏「＋ 添加项目」。': 'No projects yet — click "＋ Add Project" in the left sidebar.',
-    '{gn} 个 SKILL · {dn} 个 SKILL 目录 · {pn} 个项目': '{gn} skills · {dn} skill directories · {pn} projects',
+    '{gn} 个 SKILL · {pn} 个项目': '{gn} skills · {pn} projects',
     '{name} · SKILL': '{name} · Skills',
     '{name} 的 SKILL': '{name} skills',
     '{n} 个 Agent 通过链接共用此唯一副本': '{n} agents share this single copy via links',
