@@ -721,7 +721,7 @@ function openDetail(s) {
   $('#panel-edit').classList.add('hidden');
   $('#panel-files').classList.add('hidden');
   $('#panel-links').classList.add('hidden');
-  $$('.tab').forEach((el) => el.classList.toggle('active', el.dataset.tab === 'preview'));
+  $$('#modal-detail .tab').forEach((el) => el.classList.toggle('active', el.dataset.tab === 'preview'));
   $('#detail-editor').value = t('加载中…');
   $('#detail-files').innerHTML = '<li>' + t('加载中…') + '</li>';
   openModal('modal-detail');
