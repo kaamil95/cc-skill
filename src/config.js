@@ -58,6 +58,7 @@ function loadConfig() {
     /* 首次运行或损坏则重置 */
   }
   config = { agents: JSON.parse(JSON.stringify(DEFAULT_AGENTS)), projects: [], ui: normalizeUi(null) };
+  normalizeConfigInPlace(); // 补齐 proxy / market 这类带默认值的字段
   ensureMachineId();
   saveConfig();
 }
@@ -71,10 +72,20 @@ function ensureMachineId() {
   return true;
 }
 
-// 界面偏好：语言 + 弹窗遮罩的毛玻璃强度。越界 / 缺失一律回落到默认值，
+// 界面偏好：语言 + 主题 + 强调色 + 弹窗遮罩的毛玻璃强度。越界 / 缺失一律回落到默认值，
 // 免得手改 config.json 写进离谱的数字后界面直接看不见。
 const OVERLAY_LIMITS = { blur: [0, 40], dim: [0, 0.8] };
 const OVERLAY_DEFAULTS = { blur: 24, dim: 0.3 };
+
+// 主题清单与各自的窗口底色。底色要在这里有一份，因为窗口是在渲染层之前创建的，
+// 主进程得先铺对底色，否则切到深色主题后启动/重载会闪一下白。
+// 具体的配色在 renderer/styles.css 里（[data-theme='...'] 块），这里只管窗口背景。
+const THEMES = ['light', 'dark', 'sepia', 'contrast'];
+const THEME_BG = { light: '#f5f5f7', dark: '#1b1b1e', sepia: '#f4efe6', contrast: '#ffffff' };
+const ACCENT_AUTO = 'auto'; // 跟随主题自带的强调色
+const ACCENT_RE = /^#[0-9a-f]{6}$/i;
+
+const themeBg = (theme) => THEME_BG[THEMES.includes(theme) ? theme : 'light'];
 
 function normalizeUi(ui) {
   const clamp = (v, [lo, hi], dflt) => {
@@ -83,8 +94,12 @@ function normalizeUi(ui) {
     const n = Number(v);
     return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : dflt;
   };
+  const theme = ui && THEMES.includes(ui.theme) ? ui.theme : 'light';
   return {
     lang: ui && ['auto', 'zh', 'en'].includes(ui.lang) ? ui.lang : 'auto',
+    theme,
+    // 强调色只接受规范 6 位十六进制；其余（含缺失、乱填）一律 'auto' = 用主题自带的
+    accent: ui && typeof ui.accent === 'string' && ACCENT_RE.test(ui.accent.trim()) ? ui.accent.trim().toLowerCase() : ACCENT_AUTO,
     overlayBlur: clamp(ui && ui.overlayBlur, OVERLAY_LIMITS.blur, OVERLAY_DEFAULTS.blur),
     overlayDim: clamp(ui && ui.overlayDim, OVERLAY_LIMITS.dim, OVERLAY_DEFAULTS.dim),
   };
@@ -139,6 +154,10 @@ module.exports = {
   DEFAULT_AGENTS,
   OVERLAY_LIMITS,
   OVERLAY_DEFAULTS,
+  THEMES,
+  THEME_BG,
+  ACCENT_AUTO,
+  themeBg,
   normalizeUi,
   initConfig,
   getConfig,

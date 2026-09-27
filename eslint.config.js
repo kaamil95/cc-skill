@@ -25,13 +25,13 @@ module.exports = [
     },
   },
 
-  // 渲染层：浏览器全局，外加 preload 暴露的 api、i18n.js 提供的 i18n / t / tf
+  // 渲染层：浏览器全局，外加 preload 暴露的 api、i18n.js 提供的 i18n / t / tf、theme.js 的 theme
   {
     files: ['renderer/**/*.js'],
     languageOptions: {
       ecmaVersion: 2023,
       sourceType: 'script',
-      globals: { ...globals.browser, api: 'readonly', i18n: 'readonly', t: 'readonly', tf: 'readonly' },
+      globals: { ...globals.browser, api: 'readonly', i18n: 'readonly', t: 'readonly', tf: 'readonly', theme: 'readonly' },
     },
     rules: {
       ...js.configs.recommended.rules,

@@ -23,6 +23,17 @@ function makeElectronStub({ dataDir, workDir, trashItem }) {
   const handlers = new Map();
   // 如实记录 setPath：main.js 会 setPath('userData', <数据目录>/user-data)，getPath 得读回来
   const customPaths = new Map();
+  // 窗口侧的行为也要如实建模：main.js 装了导航守卫、加载失败自愈、快捷键，
+  // 桩缺一个方法就会在启动时把整个集成测试打断。listeners 让测试能真实触发这些事件。
+  const windowState = {
+    listeners: new Map(),
+    loadFileCalls: [],
+    openPathCalls: [],
+    openExternalCalls: [],
+    windowOpenHandler: null,
+    backgroundColors: [],
+    windowOptions: {},
+  };
   const stub = {
     app: {
       isPackaged: false,
@@ -41,8 +52,8 @@ function makeElectronStub({ dataDir, workDir, trashItem }) {
     },
     ipcMain: { handle: (ch, fn) => handlers.set(ch, fn) },
     BrowserWindow: class {
-      constructor() {
-        // main.js 会在窗口上挂 did-finish-load 并把自动备份结果推给渲染层，桩必须如实建模
+      constructor(opts) {
+        windowState.windowOptions = opts || {};
         this.webContents = { on: () => {}, once: () => {}, send: () => {} };
       }
       loadFile() {}
@@ -50,18 +61,28 @@ function makeElectronStub({ dataDir, workDir, trashItem }) {
       isDestroyed() {
         return false;
       }
+      setBackgroundColor(c) {
+        windowState.backgroundColors.push(c);
+      }
     },
     Menu: { setApplicationMenu: () => {} },
+    // main.js 会把代理配置交给 session，并把 net.fetch 注入 src/net.js；
+    // 桩如实记录 setProxy 的入参（代理映射才断言得了），net.fetch 则透传给真 fetch——
+    // WebDAV / 市场的集成测试靠它打本地 HTTP 服务器，这里不能返回假响应
+    session: { defaultSession: { setProxy: (cfg) => windowState.proxyConfigs.push(cfg) } },
+    net: { fetch: (...args) => fetch(...args) },
     dialog: { showOpenDialog: async () => ({ canceled: true, filePaths: [] }) },
     shell: {
       // 默认真的把路径删掉，模拟「已移入回收站」
       trashItem: trashItem || (async (p) => (fs.rmSync(p, { recursive: true, force: true }), true)),
-      openPath: async () => '',
+      openPath: async (p) => (windowState.openPathCalls.push(p), ''),
       showItemInFolder: () => {},
-      openExternal: async () => {},
+      openExternal: async (u) => {
+        windowState.openExternalCalls.push(u);
+      },
     },
   };
-  return { stub, handlers };
+  return { stub, handlers, windowState };
 }
 
 async function startApp({ config, trashItem } = {}) {
@@ -73,7 +94,7 @@ async function startApp({ config, trashItem } = {}) {
   // 必须先写好配置：main.js 载入时就读它
   fs.writeFileSync(path.join(dataDir, 'config.json'), JSON.stringify(config || DEFAULT_CONFIG, null, 2), 'utf8');
 
-  const { stub, handlers } = makeElectronStub({ dataDir, workDir, trashItem });
+  const { stub, handlers, windowState } = makeElectronStub({ dataDir, workDir, trashItem });
   const origLoad = Module._load;
   Module._load = function (request) {
     return request === 'electron' ? stub : origLoad.apply(this, arguments);
@@ -99,6 +120,19 @@ async function startApp({ config, trashItem } = {}) {
       return fn(null, payload);
     },
     channels: () => [...handlers.keys()],
+    // 窗口侧的可观测状态：导航守卫 / 自愈 / 系统调用都从这里断言
+    loadFileCalls: () => windowState.loadFileCalls,
+    openPathCalls: () => windowState.openPathCalls,
+    openExternalCalls: () => windowState.openExternalCalls,
+    windowOpenHandler: () => windowState.windowOpenHandler,
+    reloads: () => windowState.reloads,
+    backgroundColors: () => windowState.backgroundColors,
+    windowOptions: () => windowState.windowOptions,
+    proxyConfigs: () => windowState.proxyConfigs,
+    // 真实触发主进程挂在窗口上的事件（如 will-navigate），用来验证守卫确实拦住了
+    emitWebContents(event, ...args) {
+      for (const fn of windowState.listeners.get(event) || []) fn(...args);
+    },
     cleanup() {
       fs.rmSync(workDir, { recursive: true, force: true });
     },

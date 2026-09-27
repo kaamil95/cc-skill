@@ -62,7 +62,7 @@ test('config:set 只传 ui.lang 时不会清掉遮罩配置', async () => {
   assert.equal(r.ui.lang, 'en');
   assert.equal(r.ui.overlayBlur, 8, '遮罩模糊应被保留');
   assert.equal(r.ui.overlayDim, 0.5, '遮罩变暗应被保留');
-  assert.deepEqual(app.readConfig().ui, { lang: 'en', overlayBlur: 8, overlayDim: 0.5 });
+  assert.deepEqual(app.readConfig().ui, { lang: 'en', theme: 'light', accent: 'auto', overlayBlur: 8, overlayDim: 0.5 });
 });
 
 test('config:set 会夹住越界的遮罩值', async () => {

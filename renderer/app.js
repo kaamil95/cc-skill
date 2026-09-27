@@ -1347,17 +1347,91 @@ const readOverlayInputs = () => ({
 
 // 取消时用它把预览还原回已保存的值
 let overlaySnapshot = null;
+let themeSnapshot = null;
+
+// ------------------------------ 主题 -----------------------------------------
+// 配色本身在 styles.css 的 [data-theme] 块里（见 renderer/theme.js），这里只负责：
+// 把选择写到 DOM、同步给主进程（窗口底色，免得切深色后重载闪一下白）、驱动设置面板的选中态。
+// 启动时 theme.js 已经用 localStorage 的缓存同步套过一次，这一步是用配置里的权威值覆盖。
+function applyTheme(ui) {
+  const themeId = theme.apply(ui);
+  api.invoke('win:setBackground', { theme: themeId }).catch(() => {});
+}
+
+const currentThemeSel = () => ({
+  theme: (state.ui && state.ui.theme) || 'light',
+  accent: (state.ui && state.ui.accent) || 'auto',
+});
+
+// 预设色块按 theme.ACCENTS 生成，配色清单只维护一处。
+// 用 DocumentFragment 一次性插入：逐个 insertBefore(auto.nextSibling) 会把顺序倒过来。
+function renderAccentChips() {
+  const box = $('#set-accent');
+  if (!box || box.dataset.ready) return;
+  const frag = document.createDocumentFragment();
+  for (const hex of theme.ACCENTS) {
+    const b = document.createElement('button');
+    b.className = 'accent-opt';
+    b.dataset.accent = hex;
+    b.style.setProperty('--sw', hex);
+    b.title = hex;
+    frag.appendChild(b);
+  }
+  box.insertBefore(frag, $('.accent-opt.custom', box));
+  box.dataset.ready = '1';
+}
+
+function fillThemeInputs(ui) {
+  const themeId = (ui && ui.theme) || 'light';
+  const accent = (ui && ui.accent) || 'auto';
+  $$('#set-theme .theme-opt').forEach((b) => b.classList.toggle('active', b.dataset.themeId === themeId));
+  $$('#set-accent .accent-opt').forEach((b) => b.classList.toggle('active', (b.dataset.accent || '') === accent));
+  // 取色器的初值：没选自定义色时，用当前生效的强调色（可能来自主题本身）
+  const live = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim();
+  const custom = $('#set-accent-custom');
+  if (custom) custom.value = theme.isHex(accent) ? accent : theme.isHex(live) ? live : '#0071e3';
+}
+
+const readThemeInputs = () => {
+  const t1 = $('#set-theme .theme-opt.active');
+  const a1 = $('#set-accent .accent-opt.active');
+  return { theme: t1 ? t1.dataset.themeId : 'light', accent: a1 ? a1.dataset.accent : 'auto' };
+};
+
+// 点选即预览：只改 DOM，不落盘；取消时按打开设置时的快照还原
+const previewTheme = (themeId, accent) => {
+  applyTheme({ theme: themeId, accent });
+  fillThemeInputs({ theme: themeId, accent });
+};
+
+$('#set-theme').addEventListener('click', (e) => {
+  const btn = e.target.closest('.theme-opt');
+  if (btn) previewTheme(btn.dataset.themeId, readThemeInputs().accent);
+});
+$('#set-accent').addEventListener('click', (e) => {
+  const btn = e.target.closest('.accent-opt[data-accent]');
+  if (btn) previewTheme(readThemeInputs().theme, btn.dataset.accent);
+});
+$('#set-accent-custom').addEventListener('input', (e) => previewTheme(readThemeInputs().theme, e.target.value));
 
 function openSettings() {
   fillWebdavInputs(state.webdav);
   $('#set-lang').value = (state.ui && state.ui.lang) || 'auto';
   fillOverlayInputs(state.ui);
   overlaySnapshot = readOverlayInputs();
+  renderAccentChips();
+  fillThemeInputs(currentThemeSel());
+  themeSnapshot = readThemeInputs();
+  fillProxyInputs(state.proxy);
   openModal('modal-settings');
 }
 
 function closeSettings(revertPreview) {
   if (revertPreview && overlaySnapshot) applyOverlay(overlaySnapshot);
+  if (revertPreview && themeSnapshot) {
+    applyTheme(themeSnapshot);
+    fillThemeInputs(themeSnapshot);
+  }
   closeModal('modal-settings');
 }
 
