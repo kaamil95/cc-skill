@@ -5,6 +5,7 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const { tempDir, expand, isTilde, toTilde } = require('./paths');
+const { httpFetch } = require('./net');
 const { M } = require('./i18n');
 const { packZip, unpackZip } = require('./zip');
 const { getConfig, saveConfig, buildConfigPayload, normalizeConfigInPlace, normalizeUi, mergeAgentDirs } = require('./config');
@@ -53,7 +54,9 @@ function davAuth(cfg) {
 }
 
 async function davRequest(cfg, method, url, { body, headers = {} } = {}) {
-  const res = await fetch(url, {
+  // 走 src/net.js 的注入式 fetch：主进程注入的是 Electron 的 net.fetch，
+  // 因此这里会认用户配置的代理；直接用全局 fetch 的话代理配置形同虚设。
+  const res = await httpFetch(url, {
     method,
     headers: { Authorization: davAuth(cfg), ...headers },
     body,

@@ -87,6 +87,67 @@ const ACCENT_RE = /^#[0-9a-f]{6}$/i;
 
 const themeBg = (theme) => THEME_BG[THEMES.includes(theme) ? theme : 'light'];
 
+// ------------------------------ 网络代理 -------------------------------------
+// 代理是本机配置：不进云备份（127.0.0.1:7890 换台机器就是错的，URL 里还可能带密码）。
+const PROXY_MODES = ['system', 'direct', 'manual'];
+const PROXY_SCHEMES = ['http://', 'https://', 'socks5://', 'socks4://'];
+
+function normalizeProxy(p) {
+  const url = p && typeof p.url === 'string' ? p.url.trim() : '';
+  return {
+    // 默认 system：跟 Chromium 一致——系统配了代理就跟着走，没配就是直连
+    mode: p && PROXY_MODES.includes(p.mode) ? p.mode : 'system',
+    url: PROXY_SCHEMES.some((s) => url.toLowerCase().startsWith(s)) ? url : '',
+    bypass: p && typeof p.bypass === 'string' ? p.bypass.trim() : '',
+  };
+}
+
+/**
+ * 代理配置 → Electron session.setProxy 的入参（纯映射，便于单测）。
+ * 手动模式但地址为空时回落到 system：宁可跟随系统，也不要让网络整个断掉。
+ * bypass 一律补上 <local>：本地回环地址走代理是绝大多数「连不上」的根源。
+ */
+function proxyToSessionConfig(proxy) {
+  const p = normalizeProxy(proxy);
+  if (p.mode === 'direct') return { mode: 'direct' };
+  if (p.mode === 'manual' && p.url) {
+    return { mode: 'fixed_servers', proxyRules: p.url, proxyBypassRules: [p.bypass, '<local>'].filter(Boolean).join(',') };
+  }
+  return { mode: 'system' };
+}
+
+/** 从代理 URL 里取出鉴权凭据；Chromium 不会自动使用 URL 里的 user:pass */
+function proxyCredentials(proxy) {
+  const p = normalizeProxy(proxy);
+  if (p.mode !== 'manual' || !p.url) return null;
+  try {
+    const u = new URL(p.url);
+    if (!u.username) return null;
+    return { username: decodeURIComponent(u.username), password: decodeURIComponent(u.password || '') };
+  } catch (_) {
+    return null;
+  }
+}
+
+/**
+ * 写日志 / 报错时用的代理地址：抹掉 user:pass。
+ * 代理配置是本机敏感信息，明文凭据不该落到 cc-skill.log 里。
+ * 传入的不是合法 URL（比如一整条错误信息）时按字符串粗暴处理，宁可多抹。
+ */
+function redactProxyUrl(url) {
+  const s = String(url || '');
+  if (!s) return s;
+  try {
+    const u = new URL(s);
+    if (!u.username && !u.password) return s;
+    u.username = u.password ? '***' : u.username;
+    u.password = '';
+    return u.toString();
+  } catch (_) {
+    return s.replace(/\/\/[^/@\s]*@/g, '//***@');
+  }
+}
+
 function normalizeUi(ui) {
   const clamp = (v, [lo, hi], dflt) => {
     // 注意 Number(null) === 0：空值必须先单独挡掉，否则「没配」会被当成「配成 0」
@@ -158,6 +219,11 @@ module.exports = {
   THEME_BG,
   ACCENT_AUTO,
   themeBg,
+  PROXY_MODES,
+  normalizeProxy,
+  proxyToSessionConfig,
+  proxyCredentials,
+  redactProxyUrl,
   normalizeUi,
   initConfig,
   getConfig,

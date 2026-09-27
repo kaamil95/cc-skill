@@ -6,7 +6,10 @@ const os = require('os');
 const { ipcMain, dialog, shell } = require('electron');
 const { IPC_CHANNEL_SET } = require('../ipc-channels');
 const { expand, tempDir } = require('./paths');
-const { DEFAULT_AGENTS, getConfig, saveConfig, normalizeConfigInPlace, normalizeUi } = require('./config');
+const { resolveRef } = require('./nav');
+const { logLine } = require('./applog');
+const { DEFAULT_AGENTS, getConfig, saveConfig, normalizeConfigInPlace, normalizeUi, normalizeProxy, normalizeMarket, themeBg } = require('./config');
+const { httpGet } = require('./net');
 const {
   parseFrontmatter,
   firstParagraph,
@@ -24,7 +27,7 @@ const {
 const { unpackZip } = require('./zip');
 const webdav = require('./webdav');
 
-function registerIpcHandlers({ getWindow, appDir, userData }) {
+function registerIpcHandlers({ getWindow, appDir, userData, applyProxy }) {
   const handle = (ch, fn) => {
     // 白名单与处理器必须一一对应：漏进白名单的通道渲染进程永远调不到，这里直接拦在启动时
     if (!IPC_CHANNEL_SET.has(ch)) {
@@ -40,8 +43,10 @@ function registerIpcHandlers({ getWindow, appDir, userData }) {
   };
 
   // ------------------------------ 扫描 / 配置 --------------------------------
-  // scan 的返回体里带上 WebDAV 配置（渲染层启动时要用），由这里拼装以保持 skills 模块纯净
-  handle('scan', () => ({ ...scanAll(), webdav: webdav.webdavCfg() }));
+  // scan 的返回体里带上 WebDAV 配置（渲染层启动时要用），由这里拼装以保持 skills 模块纯净。
+  // ok 必须显式给：handle 的兜底返回是 { ok:false }，渲染层据此区分「扫描成功但没内容」
+  // 和「扫描整个失败了」——少了它，失败时渲染层会把 undefined 当数据用，界面停在空壳上。
+  handle('scan', () => ({ ok: true, ...scanAll(), webdav: webdav.webdavCfg() }));
 
   handle('config:get', () => ({ agents: getConfig().agents }));
   handle('config:set', ({ agents, projects, ui }) => {
@@ -73,6 +78,13 @@ function registerIpcHandlers({ getWindow, appDir, userData }) {
   handle('skill:read', ({ path: p }) => readSkill(p));
   handle('skill:write', ({ path: p, content }) => writeSkill(p, content));
   handle('skill:files', ({ dir, type }) => listSkillFiles(dir, type));
+  // SKILL.md 里点开的相对链接：按 skill 目录（baseDir）解析，绝不按页面目录。
+  // 解析与「该不该放行」的判定全在 src/nav.js，渲染层只负责展示。
+  handle('skill:readRef', ({ baseDir, href }) => {
+    const ref = resolveRef(baseDir, href);
+    if (!ref.ok || ref.kind !== 'text') return ref; // external / other / 失败原因原样回传
+    return { ...ref, ...readSkill(ref.path) };
+  });
   handle('skill:copy', (args) => copySkill(args));
   handle('skill:trash', ({ path: p }) => trashSkill(p, { trashItem: (abs) => shell.trashItem(abs) }));
   handle('skill:create', (args) => createSkill(args));
@@ -124,26 +136,33 @@ function registerIpcHandlers({ getWindow, appDir, userData }) {
   // ------------------------------ 外壳 / 日志 / 路径 ---------------------------
   handle('shell:openPath', ({ path: p }) => shell.openPath(expand(p)));
 
+  // 外链只允许交给系统浏览器。scheme 白名单是硬性的：渲染层的 href 来自 SKILL.md，
+  // 是第三方内容，不能让它直接驱动 shell
+  handle('shell:openUrl', async ({ url }) => {
+    let u;
+    try {
+      u = new URL(String(url || ''));
+    } catch (_) {
+      return { ok: false, reason: 'invalid' };
+    }
+    if (!['http:', 'https:', 'mailto:'].includes(u.protocol)) return { ok: false, reason: 'scheme' };
+    await shell.openExternal(u.href);
+    return { ok: true };
+  });
+
   handle('app:paths', () => ({
     userData,
     home: os.homedir(),
     logFile: path.join(appDir(), 'cc-skill.log'),
     // 归一化后再下发：渲染层拿到的永远是完整对象，不会因为某个字段缺失而算出 0
     ui: normalizeUi(getConfig().ui),
+    proxy: normalizeProxy(getConfig().proxy),
     // 渲染层据此调整自绘标题栏：macOS 用系统原生红绿灯，不再画一套自己的窗口按钮
     platform: process.platform,
   }));
 
   // 操作日志落盘（渲染端每条 toast 都会同步一份），便于事后排查
-  handle('log:append', ({ type, msg }) => {
-    try {
-      const line = `[${new Date().toLocaleString('zh-CN', { hour12: false })}] [${String(type || 'info').toUpperCase()}] ${msg}\n`;
-      fs.appendFileSync(path.join(appDir(), 'cc-skill.log'), line, 'utf8');
-      return { ok: true };
-    } catch (err) {
-      return { ok: false, error: String((err && err.message) || err) };
-    }
-  });
+  handle('log:append', ({ type, msg }) => logLine(path.join(appDir(), 'cc-skill.log'), type, msg));
 
   // ------------------------------ WebDAV 云同步 -------------------------------
   handle('sync:getConfig', () => ({ ok: true, webdav: webdav.webdavCfg() }));
@@ -152,6 +171,36 @@ function registerIpcHandlers({ getWindow, appDir, userData }) {
   handle('sync:backup', () => webdav.backup());
   handle('sync:restoreInfo', () => webdav.restoreInfo());
   handle('sync:restoreApply', ({ name, agentIds }) => webdav.restoreApply({ name, agentIds }));
+
+  // ------------------------------ 网络代理 ------------------------------------
+  // 代理是本机配置（不进云备份）：手动模式可能带凭据，且 127.0.0.1 换台机器就不对了
+  const apply = async (proxy) => {
+    if (typeof applyProxy === 'function') await applyProxy(proxy);
+  };
+
+  handle('proxy:get', () => ({ ok: true, proxy: normalizeProxy(getConfig().proxy) }));
+  handle('proxy:set', async ({ proxy }) => {
+    const config = getConfig();
+    config.proxy = normalizeProxy({ ...config.proxy, ...proxy });
+    saveConfig();
+    await apply(config.proxy);
+    return { ok: true, proxy: config.proxy };
+  });
+  // 测试用「界面上刚填的值」而不是已保存的值——否则改了地址点测试，测的还是旧代理，
+  // 结论会骗人。测完恢复成已保存的配置，不留副作用。
+  handle('proxy:test', async ({ proxy }) => {
+    const saved = normalizeProxy(getConfig().proxy);
+    await apply(proxy ? normalizeProxy({ ...saved, ...proxy }) : saved);
+    const t0 = Date.now();
+    try {
+      await httpGet('https://api.github.com/', { headers: { 'user-agent': 'cc-skill' }, timeoutMs: 15000 });
+      return { ok: true, ms: Date.now() - t0 };
+    } catch (err) {
+      return { ok: false, error: String((err && err.message) || err) };
+    } finally {
+      await apply(saved);
+    }
+  });
 
   // ------------------------------ 窗口控制（自绘标题栏）----------------------
   handle('win:minimize', () => {
@@ -169,6 +218,13 @@ function registerIpcHandlers({ getWindow, appDir, userData }) {
   handle('win:close', () => {
     const win = getWindow();
     if (win) win.close();
+    return { ok: true };
+  });
+  // 换主题时同步窗口底色：窗口背景是原生层，不跟着改的话切到深色后重载会闪一下白
+  handle('win:setBackground', ({ theme }) => {
+    const win = getWindow();
+    if (!win || win.isDestroyed()) return { ok: false };
+    win.setBackgroundColor(themeBg(theme));
     return { ok: true };
   });
 }

@@ -27,9 +27,13 @@ const IPC_CHANNELS = [
   'sync:backup',
   'sync:restoreInfo',
   'sync:restoreApply',
+  'proxy:get',
+  'proxy:set',
+  'proxy:test',
   'win:minimize',
   'win:maximize',
   'win:close',
+  'win:setBackground',
 ];
 
 module.exports = { IPC_CHANNELS, IPC_CHANNEL_SET: new Set(IPC_CHANNELS) };

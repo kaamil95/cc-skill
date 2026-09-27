@@ -36,6 +36,13 @@ test('只改语言时不会把主题清掉（ui 是合并而不是整体替换�
   assert.equal(r.ui.lang, 'en');
 });
 
+test('win:setBackground 按主题换窗口底色，未知主题回落到浅色', async () => {
+  await app.invoke('win:setBackground', { theme: 'contrast' });
+  assert.equal(app.backgroundColors().at(-1), THEME_BG.contrast);
+  await app.invoke('win:setBackground', { theme: 'nope' });
+  assert.equal(app.backgroundColors().at(-1), THEME_BG.light);
+});
+
 test('app:paths 下发的 ui 带主题字段（渲染层启动时读它）', async () => {
   const p = await app.invoke('app:paths');
   assert.ok(['light', 'dark', 'sepia', 'contrast'].includes(p.ui.theme));

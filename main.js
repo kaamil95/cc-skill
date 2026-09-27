@@ -1,6 +1,6 @@
 // CC Skill 主进程入口：只做启动装配——数据目录、配置初始化、IPC 注册、窗口与生命周期。
 // 具体业务在 src/ 下按职责拆分，且不依赖 electron，可被 `node --test` 直接测试。
-const { app, BrowserWindow, Menu, shell } = require('electron');
+const { app, BrowserWindow, Menu, shell, session, net } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { pathToFileURL } = require('url');
@@ -8,7 +8,8 @@ const { pathToFileURL } = require('url');
 const { setTempDir, sweepStaleTempDirs, resolveDataDir } = require('./src/paths');
 const { classifyNavigation } = require('./src/nav');
 const { logLine } = require('./src/applog');
-const { initConfig } = require('./src/config');
+const { setFetchImpl } = require('./src/net');
+const { initConfig, getConfig, themeBg, normalizeProxy, proxyToSessionConfig, proxyCredentials, redactProxyUrl } = require('./src/config');
 const { initMainMessages } = require('./src/i18n');
 const { registerIpcHandlers } = require('./src/ipc');
 const { startAutoBackup } = require('./src/webdav');
@@ -66,10 +67,45 @@ const USER_DATA_DIR = path.join(DATA_DIR, 'user-data');
 // 且 CC_SKILL_DATA_DIR 隔离的测试实例不会和正式实例抢锁
 app.setPath('userData', USER_DATA_DIR);
 
+// ------------------------------ 网络 ----------------------------------------
+// 应用的网络出口统一走 Electron 的 net.fetch：它认 session 上配置的代理
+// （系统代理 / PAC / 手动代理），而 Node 的全局 fetch 一概不认。
+setFetchImpl((url, opts) => net.fetch(url, opts));
+
+// 当前生效的代理。代理鉴权要读它而不是配置里的值：proxy:test 会用界面上还没保存的
+// 地址临时套一次，那时配置里还是旧的，按配置应答会拿错凭据、报假的 407。
+let activeProxy = null;
+
+/** 把代理配置应用到整个应用的网络栈（Chromium 层 + net.fetch 一并生效） */
+async function applyProxy(proxy) {
+  const p = normalizeProxy(proxy);
+  activeProxy = p;
+  const cfg = proxyToSessionConfig(p);
+  try {
+    // setProxy 返回 Promise，必须 await：不 await 的话紧接着发出的请求可能还在走旧代理，
+    // 「套用 → 测速 → 还原」三步会乱序
+    await session.defaultSession.setProxy(cfg);
+    // 代理地址里可能带 user:pass，落盘日志前先抹掉
+    logInfo('代理已应用：' + (cfg.mode === 'fixed_servers' ? 'fixed_servers ' + redactProxyUrl(cfg.proxyRules) : cfg.mode));
+  } catch (err) {
+    logErr('应用代理失败：' + redactProxyUrl(String((err && err.message) || err)));
+  }
+}
+
+// 代理要鉴权时 Chromium 不会自动使用 URL 里的 user:pass，得在这里应答
+app.on('login', (event, _wc, _details, authInfo, callback) => {
+  if (!authInfo || !authInfo.isProxy) return;
+  const creds = proxyCredentials(activeProxy || getConfig().proxy);
+  if (!creds) return;
+  event.preventDefault();
+  callback(creds.username, creds.password);
+});
+
 registerIpcHandlers({
   getWindow: () => win,
   appDir,
   userData: USER_DATA_DIR,
+  applyProxy,
 });
 
 // 主进程的兜底：异常不该让窗口无声无息地消失。记日志，让用户能在操作日志里看到线索。
@@ -168,7 +204,8 @@ function createWindow() {
     height: 880,
     minWidth: 1000,
     minHeight: 640,
-    backgroundColor: '#f5f5f7',
+    // 窗口底色先按配置里的主题铺好：渲染层还没跑起来之前，露出来的就是它
+    backgroundColor: themeBg(getConfig().ui.theme),
     icon: path.join(__dirname, 'assets', 'icon.ico'),
     titleBarStyle: 'hidden',
     trafficLightPosition: { x: 14, y: 22 },
@@ -197,6 +234,7 @@ if (!gotLock) {
   });
   app.whenReady().then(() => {
     initConfig(DATA_DIR);
+    applyProxy(getConfig().proxy);
     createWindow();
     // 自动备份：等窗口就绪再起，否则启动那一轮的结果推不出去；之后由定时器定期复查。
     // 结果一律转给界面——后台悄悄发生的事，用户有权知道。

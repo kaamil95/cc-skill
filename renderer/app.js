@@ -1588,14 +1588,54 @@ $('#modal-settings').addEventListener('mousedown', (e) => {
   if (e.target === e.currentTarget) closeSettings(true);
 });
 
+// ------------------------------ 网络代理 -------------------------------------
+// 代理生效在 main 进程（session.setProxy），这里只管收集输入与测试。
+// 测试按钮用「界面上刚填的值」而不是已保存的值：否则改了地址点测试，测的还是旧代理。
+function fillProxyInputs(proxy) {
+  const p = proxy || { mode: 'system', url: '', bypass: '' };
+  $('#px-mode').value = p.mode || 'system';
+  $('#px-url').value = p.url || '';
+  $('#px-bypass').value = p.bypass || '';
+  $('#px-status').textContent = '';
+  $('#px-status').style.color = '';
+  syncProxyInputs();
+}
+
+function syncProxyInputs() {
+  const manual = $('#px-mode').value === 'manual';
+  $('#px-url').disabled = !manual;
+  $('#px-bypass').disabled = !manual;
+  $('#px-url').style.opacity = manual ? '' : '0.5';
+  $('#px-bypass').style.opacity = manual ? '' : '0.5';
+}
+
+const readProxyInputs = () => ({ mode: $('#px-mode').value, url: $('#px-url').value.trim(), bypass: $('#px-bypass').value.trim() });
+
+$('#px-mode').addEventListener('change', syncProxyInputs);
+
+$('#btn-px-test').addEventListener('click', async () => {
+  const st = $('#px-status');
+  st.style.color = '';
+  st.textContent = t('测试中…');
+  const r = await api.invoke('proxy:test', { proxy: readProxyInputs() });
+  st.style.color = r.ok ? 'var(--ok-text)' : 'var(--err-text)';
+  st.textContent = r.ok ? tf('连接正常（{ms} ms）', { ms: r.ms }) : t('连接失败：') + (r.error || '');
+});
+
 $('#btn-save-settings').addEventListener('click', async () => {
   if (!(await wdSave())) return;
   const lang = $('#set-lang').value;
-  const r = await api.invoke('config:set', { ui: { lang, ...readOverlayInputs() } });
+  const r = await api.invoke('config:set', { ui: { lang, ...readOverlayInputs(), ...readThemeInputs() } });
   if (r.ok) {
     state.ui = r.ui || { lang };
+    // 代理单独走一条通道：它要顺带把配置应用到 session，不像 ui 只是存个偏好
+    const px = await api.invoke('proxy:set', { proxy: readProxyInputs() });
+    if (px.ok) state.proxy = px.proxy;
     applyOverlay(state.ui);
+    applyTheme(state.ui);
+    theme.cache(state.ui); // 供下次启动首帧前套用，避免闪一下默认配色
     overlaySnapshot = readOverlayInputs();
+    themeSnapshot = readThemeInputs();
     i18n.setLang(lang);
     i18n.apply(document);
     toast(t('设置已保存 ✓'), 'ok');

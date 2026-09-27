@@ -7,6 +7,10 @@ const {
   THEMES,
   THEME_BG,
   themeBg,
+  normalizeProxy,
+  proxyToSessionConfig,
+  proxyCredentials,
+  redactProxyUrl,
 } = require('../../src/config');
 
 test('ui 缺失时给全套默认值', () => {
@@ -77,5 +81,52 @@ test('每个主题都有窗口底色（主进程要在渲染层之前铺对底�
   // 未知主题不能让窗口底色变成 undefined
   assert.equal(themeBg('nope'), THEME_BG.light);
   assert.equal(themeBg(undefined), THEME_BG.light);
+});
+
+// ------------------------------ 代理 ----------------------------------------
+test('代理默认跟随系统，非法值一律回落', () => {
+  for (const bad of [null, undefined, {}, { mode: 'socks' }, { mode: 'MANUAL' }]) {
+    assert.equal(normalizeProxy(bad).mode, 'system', JSON.stringify(bad));
+  }
+  assert.equal(normalizeProxy({ mode: 'manual' }).url, '');
+});
+
+test('代理地址只接受 http/https/socks，其余清空（免得把垃圾写进 session）', () => {
+  assert.equal(normalizeProxy({ mode: 'manual', url: '  http://127.0.0.1:7890 ' }).url, 'http://127.0.0.1:7890');
+  assert.equal(normalizeProxy({ mode: 'manual', url: 'socks5://127.0.0.1:1080' }).url, 'socks5://127.0.0.1:1080');
+  assert.equal(normalizeProxy({ mode: 'manual', url: '127.0.0.1:7890' }).url, '', '缺 scheme 不算合法地址');
+  assert.equal(normalizeProxy({ mode: 'manual', url: 'file:///etc/passwd' }).url, '');
+});
+
+test('代理 → session 配置：三种模式的映射，bypass 一律补 <local>', () => {
+  assert.deepEqual(proxyToSessionConfig({ mode: 'system' }), { mode: 'system' });
+  assert.deepEqual(proxyToSessionConfig({ mode: 'direct' }), { mode: 'direct' });
+  assert.deepEqual(proxyToSessionConfig({ mode: 'manual', url: 'http://127.0.0.1:7890' }), {
+    mode: 'fixed_servers',
+    proxyRules: 'http://127.0.0.1:7890',
+    proxyBypassRules: '<local>',
+  });
+  assert.deepEqual(proxyToSessionConfig({ mode: 'manual', url: 'http://p:1', bypass: '*.internal, 10.0.0.0/8' }), {
+    mode: 'fixed_servers',
+    proxyRules: 'http://p:1',
+    // Chromium 的 bypass 列表是不带空格的逗号分隔
+    proxyBypassRules: '*.internal, 10.0.0.0/8,<local>',
+  });
+  // 手动但没填地址：宁可跟随系统，也不要让网络整个断掉
+  assert.deepEqual(proxyToSessionConfig({ mode: 'manual', url: '' }), { mode: 'system' });
+});
+
+test('代理鉴权凭据从 URL 里取，Chromium 不会自己用 user:pass', () => {
+  assert.deepEqual(proxyCredentials({ mode: 'manual', url: 'http://u:p%40w@127.0.0.1:7890' }), { username: 'u', password: 'p@w' });
+  assert.equal(proxyCredentials({ mode: 'manual', url: 'http://127.0.0.1:7890' }), null);
+  assert.equal(proxyCredentials({ mode: 'system', url: 'http://u:p@127.0.0.1:7890' }), null);
+});
+
+test('代理地址落日志前抹掉凭据（明文密码不该写进 cc-skill.log）', () => {
+  assert.match(redactProxyUrl('http://user:secret@127.0.0.1:7890'), /^http:\/\/\*\*\*@127\.0\.0\.1:7890/);
+  assert.equal(redactProxyUrl('http://127.0.0.1:7890'), 'http://127.0.0.1:7890');
+  // 传进来的可能是一整条错误信息而不是纯 URL：按字符串粗暴抹，宁可多抹
+  assert.equal(redactProxyUrl('连接失败：http://u:p@h:1 不可用'), '连接失败：http://***@h:1 不可用');
+  assert.equal(redactProxyUrl(''), '');
 });
 
