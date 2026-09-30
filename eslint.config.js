@@ -9,9 +9,9 @@ module.exports = [
     ignores: ['node_modules/**', 'dist/**', 'dist2/**', 'user-data/**', '.omc/**', 'assets/**'],
   },
 
-  // 主进程、构建脚本、测试：Node + CommonJS
+  // 主进程、构建 / 发版脚本、测试：Node + CommonJS
   {
-    files: ['main.js', 'preload.js', 'ipc-channels.js', 'eslint.config.js', 'src/**/*.js', 'test/**/*.js'],
+    files: ['main.js', 'preload.js', 'ipc-channels.js', 'eslint.config.js', 'src/**/*.js', 'scripts/**/*.js', 'test/**/*.js'],
     languageOptions: {
       ecmaVersion: 2023,
       sourceType: 'commonjs',

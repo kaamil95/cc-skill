@@ -6,6 +6,9 @@
   "author": "kaamil",
   "license": "MIT",
   "main": "main.js",
+  "engines": {
+    "node": ">=22"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com.ccskill.app.git"

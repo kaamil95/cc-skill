@@ -61,7 +61,7 @@ npm run dist          # 打包 Windows 便携版 exe（dist/CC Skill <version>.e
 npm run dist:mac      # 打包 macOS dmg（必须在 macOS 上执行，见下）
 ```
 
-环境要求：Windows 10+（链接安装依赖 NTFS）或 macOS 12+、Node.js 18+。
+环境要求：Windows 10+（链接安装依赖 NTFS）或 macOS 12+、Node.js 22+（开发与测试用；应用运行时用的是 Electron 自带的 Node）。
 
 > 每次发版都会在 [Releases](../../releases) 附上免安装便携版。
 
@@ -77,6 +77,25 @@ macOS 的 `.app` / `.dmg` **只能在 macOS 上构建**——electron-builder �
 
 macOS 上配置与日志存放在 `~/Library/Application Support/CC Skill/`——`.app` 是只读的代码签名包，
 写进去会破坏签名，所以不沿用 Windows 的便携语义（Windows 便携版仍是配置与 exe 同级，整个目录拷走即可）。
+
+### 发版
+
+判断该发一版时，改版本号、写一句发版说明、打个 tag，剩下的交给 CI：
+
+```bash
+# 1. 改 package.json 的 version（如 0.0.2）
+# 2. 把 CHANGELOG.md 的 [Unreleased] 整理成 ## [0.0.2] - 2026-10-01
+git commit -am "chore: 发 0.0.2"
+git tag v0.0.2 && git push origin main --tags
+```
+
+`Release` 工作流随即在 Windows 与 macOS 上各构建一次，把便携版 exe 与 dmg 一起挂到 Releases 上：
+
+- **版本号以 `package.json` 为准**，tag 必须与之对得上（`v0.0.2` ↔ `version: "0.0.2"`），对不上直接失败——免得发出去的包和 Release 标题是两个版本号
+- **发版说明取自 `CHANGELOG.md` 里对应版本那一节**（`scripts/release-notes.js`）；那一节还没写就退回 GitHub 自动生成的说明
+- macOS 产物未签名，首次打开需右键 →「打开」（见上）
+
+只想单独拿一个 dmg、不发版时，手动触发 **Actions → Build macOS**。
 
 ## 实现原理
 

@@ -1,0 +1,109 @@
+name: Release
+
+# 打一个 v* tag 就发一版：Windows 便携版 + macOS dmg 自动构建，并挂到 Release 上。
+#
+# 版本号以 package.json 为准，tag 必须与之对得上 —— 对不上直接失败，
+# 免得发出去的包和 Release 标题是两个版本号。
+# 发版说明从 CHANGELOG.md 里对应版本那一节取（见 scripts/release-notes.js）；
+# 那一节还没写就退回 GitHub 自动生成的说明。
+on:
+  push:
+    tags: ['v*']
+
+# 创建 Release 与上传附件要写权限；仓库默认的 GITHUB_TOKEN 通常是只读的
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      # 两个平台互不牵连：Windows 挂了也让 macOS 跑完，一次就能看到全部结果
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            script: dist
+            artifact: windows
+            files: dist/*.exe
+          - os: macos-latest
+            script: dist:mac
+            artifact: macos
+            files: dist/*.dmg
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # 打包要真的 Electron 二进制（会打进 .app / exe），所以不加 --ignore-scripts
+      - run: npm ci
+
+      - run: npm test
+
+      # --publish never：发 Release 统一由下面的 release job 做，别让 electron-builder
+      # 自己也去建一个。没配证书时明确跳过签名，免得它去翻钥匙串。
+      # 想签名 + 公证：在仓库 secrets 里配好证书与 APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD /
+      # APPLE_TEAM_ID，并去掉 CSC_IDENTITY_AUTO_DISCOVERY 这一行
+      - run: npm run ${{ matrix.script }} -- --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cc-skill-${{ matrix.artifact }}
+          path: ${{ matrix.files }}
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: 校验 tag 与 package.json 的版本号一致
+        run: |
+          pkg=$(node -p "require('./package.json').version")
+          tag="${GITHUB_REF_NAME#v}"
+          echo "package.json=$pkg  tag=$tag"
+          if [ "$pkg" != "$tag" ]; then
+            echo "::error::tag $GITHUB_REF_NAME 与 package.json 的 $pkg 对不上 —— 先把 package.json 改成 $tag 再打 tag"
+            exit 1
+          fi
+
+      - name: 取发版说明
+        run: |
+          node scripts/release-notes.js "$GITHUB_REF_NAME" > release-notes.md
+          if [ -s release-notes.md ]; then
+            echo "用 CHANGELOG 里 $GITHUB_REF_NAME 那一节"
+          else
+            echo "CHANGELOG 里没有这一节，改用 GitHub 自动生成的说明"
+          fi
+
+      - name: 创建 Release 并上传安装包
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ -s release-notes.md ]; then notes=(--notes-file release-notes.md); else notes=(--generate-notes); fi
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            # 重跑同一个 tag 时 release 已经在了，gh release create 会报错，改成覆盖附件
+            echo "Release $GITHUB_REF_NAME 已存在，覆盖附件"
+            gh release upload "$GITHUB_REF_NAME" artifacts/* --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              --title "CC Skill $GITHUB_REF_NAME" \
+              "${notes[@]}" \
+              artifacts/*
+          fi
