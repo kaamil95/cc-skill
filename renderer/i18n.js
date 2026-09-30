@@ -151,7 +151,9 @@
     '服务器地址': 'Server URL',
     '用户名': 'Username',
     '密码': 'Password',
-    '远程目录': 'Remote dir',
+    '远程目录': 'Remote directory',
+    '留空即用默认目录 cc-skill-sync（无需以 / 开头）；换一个目录就等于把备份放到云端的另一处。':
+      'Leave it empty to use the default directory cc-skill-sync (no leading / needed). A different directory simply keeps the backup elsewhere in your cloud drive.',
     '自动备份': 'Auto backup',
     '每次启动时': 'On startup',
     '每天': 'Daily',
@@ -174,8 +176,6 @@
     '跟随系统': 'System',
 
     // ---- 配置导入导出 ----
-    '导出配置到文件': 'Export to File',
-    '从文件导入配置': 'Import from File',
     '已从云端恢复配置 ✓': 'Config restored from cloud ✓',
     '✓ 配置已上传到云端': '✓ Config uploaded',
     '✓ 已从云端恢复配置': '✓ Config restored from cloud',
@@ -403,6 +403,8 @@
     '不走代理': 'Bypass',
     '测试中…': 'Testing…',
     '连接正常（{ms} ms）': 'Connected ({ms} ms)',
+    '链路通（{ms} ms），目标返回 HTTP {s}：多为 GitHub 匿名限流（每小时 60 次），在「发现」里填个 Token 即可':
+      'Reachable ({ms} ms) — the target answered HTTP {s}. Usually GitHub’s anonymous rate limit (60/hour); add a token under “Discover”.',
     '支持 http:// 与 socks5://，可写成 http://用户:密码@主机:端口。WebDAV 同步与 SKILL 市场都走这里；代理配置只存本机，不进云备份。':
       'http:// and socks5:// are supported, including http://user:pass@host:port. WebDAV sync and the SKILL market both use it. The proxy config stays on this machine and is not backed up.',
 
@@ -478,8 +480,8 @@
     '机器标识': 'Machine id',
     '重置标识': 'Reset id',
     '云端机器档案': 'Cloud machine profiles',
-    '导出到文件': 'Export to file',
-    '从文件导入': 'Import from file',
+    '导出配置到文件': 'Export config to file',
+    '从文件导入配置': 'Import config from file',
     '导出时包含 WebDAV 密码': 'Include the WebDAV password when exporting',
     '（未命名，用 hostname）': '(unnamed, using the hostname)',
     '机器标识决定「云端哪份备份是本机的」。重装系统后会生成新标识，恢复时勾一下「这就是这台电脑」即可认领回来；机器名只用于显示，随备份上传。':

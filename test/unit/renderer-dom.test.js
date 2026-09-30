@@ -250,8 +250,8 @@ test('新加的界面文案都有英文对照（英文环境下不会掉出中�
     '机器标识',
     '重置标识',
     '云端机器档案',
-    '导出到文件',
-    '从文件导入',
+    '导出配置到文件',
+    '从文件导入配置',
     '导出时包含 WebDAV 密码',
     '设为我的机器标识',
     '移出列表',
@@ -279,6 +279,11 @@ test('新加的界面文案都有英文对照（英文环境下不会掉出中�
     '配置',
     '网络',
     '恢复默认只影响 Agents、SKILL 目录与项目列表，不会删除磁盘上的任何文件。',
+    '导出配置到文件',
+    '从文件导入配置',
+    '远程目录',
+    '留空即用默认目录 cc-skill-sync（无需以 / 开头）；换一个目录就等于把备份放到云端的另一处。',
+    '链路通（{ms} ms），目标返回 HTTP {s}：多为 GitHub 匿名限流（每小时 60 次），在「发现」里填个 Token 即可',
   ]) {
     assert.ok(dict.includes(`'${key}':`) || dict.includes(`"${key}":`), 'i18n.js 缺少词条：' + key);
   }
@@ -482,6 +487,28 @@ test('机器卡片的三种状态各有形状与颜色，不是只靠文字', ()
   assert.match(css, /\.machine-card\.self\s*\{/, '本机要能一眼分出来（强调色竖标）');
   // 卡片与「云端机器档案」弹窗共用同一行文案，免得同一份数据两处各说各话
   assert.match(appJs, /const line = machineBackupLine\(m\)/, '卡片要复用弹窗那行文案');
+});
+
+// ------------------------------ 设置：两处容易混的入口 -------------------------
+// 踩过：顶栏有个「导入 SKILL」，设置-配置里又有「导出到文件 / 从文件导入」，两个都叫「导入」，
+// 点下去才知道一个是装 SKILL 内容、一个是换整套配置（Agents / 项目 / WebDAV）。
+// 配置页这两个名字里必须带「配置」。
+test('「导入 SKILL」与「导入配置」在名字上就分得开', () => {
+  assert.match(html, /id="btn-import"[\s\S]{0,400}?导入 SKILL/, '顶栏那个装的是 SKILL 内容');
+  assert.match(html, /id="btn-cfg-export" data-i18n="导出配置到文件"/, '配置页的导出要写明是「配置」');
+  assert.match(html, /id="btn-cfg-import" data-i18n="从文件导入配置"/, '配置页的导入要写明是「配置」');
+});
+
+// 远程目录是可留空的一项：默认值写在提示里，不逼着用户填
+test('远程目录标成可留空，留空落到默认目录', () => {
+  assert.match(html, /id="wd-path" class="input" placeholder="cc-skill-sync"/, '占位符要显示默认目录');
+  // 退一档靠的是标签变淡（.wd-optional）+ 下面那行说明；标签本身不加「（可留空）」，
+  // 76px 的标签列塞不下，会折成两行
+  assert.match(html, /<label class="wd-optional" data-i18n="远程目录">/, '标签要退一档');
+  assert.match(html, /class="hint wd-span"[\s\S]{0,200}留空即用默认目录 cc-skill-sync/, '说明里要有默认值');
+  assert.match(appJs, /remotePath: \$\('#wd-path'\)\.value\.trim\(\) \|\| 'cc-skill-sync'/, '留空要真的落到默认值（不只是提示）');
+  assert.match(css, /\.wd-grid label\.wd-optional\s*\{[^}]*--text-3/, '可留空那一项要真的变淡');
+  assert.match(css, /\.wd-grid \.wd-span\s*\{[^}]*grid-column: 1 \/ -1/, '说明要另占一整行');
 });
 
 // ------------------------------ 设置：分类页签 ---------------------------------

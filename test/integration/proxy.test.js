@@ -65,6 +65,32 @@ test('proxy:test 失败时回传错误信息而不是抛异常', async () => {
   assert.match(r.error, /ECONNREFUSED/);
 });
 
+// 踩过：api.github.com 对匿名请求按**出口 IP** 限流（每小时 60 次），走代理时出口是共享
+// 节点，一点测试就是 403。旧实现把任何非 2xx 都当成失败，界面于是报「连接失败：HTTP 403」，
+// 让人回头去折腾本来好好的代理设置 —— 其实拿到 403 恰恰证明链路是通的。
+test('proxy:test 把「连上了但被拒」与「连不上」分开：403 不算代理故障', async () => {
+  setFetchImpl(async () => ({ ok: false, status: 403, statusText: 'Forbidden', headers: { get: () => null } }));
+  const r = await app.invoke('proxy:test', {});
+  assert.equal(r.ok, true, '拿到 HTTP 响应就说明链路通');
+  assert.equal(r.httpStatus, 403);
+  assert.equal(typeof r.ms, 'number');
+});
+
+test('proxy:test 带上市场里配的 GitHub Token（匿名额度是共享出口 IP 的，自己那点额度不经用）', async () => {
+  let seen = null;
+  setFetchImpl(async (url, opts) => {
+    seen = { url, headers: (opts && opts.headers) || {} };
+    return { ok: true, status: 200, statusText: '', headers: { get: () => null } };
+  });
+  await app.invoke('market:setConfig', { token: 'ghp_secret' });
+  const r = await app.invoke('proxy:test', {});
+  assert.equal(r.ok, true);
+  assert.equal(r.httpStatus, undefined, '正常 200 就不该带 httpStatus');
+  assert.equal(seen.url, 'https://api.github.com/');
+  assert.equal(seen.headers.authorization, 'Bearer ghp_secret');
+  await app.invoke('market:setConfig', { token: '' });
+});
+
 test('代理配置不进云备份（本机地址换台机器就是错的，URL 里还可能带密码）', async () => {
   await app.invoke('proxy:set', { proxy: { mode: 'manual', url: 'http://user:secret@127.0.0.1:7890' } });
   const { buildConfigPayload } = require('../../src/config');

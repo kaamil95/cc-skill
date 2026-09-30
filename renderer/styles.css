@@ -1092,6 +1092,9 @@ select.input {
 
 .wd-grid { display: grid; grid-template-columns: 76px 1fr; gap: 9px 10px; align-items: center; }
 .wd-grid label { font-size: 12px; color: var(--text-2); }
+/* 可留空的那一项（远程目录）：标签退一档，别和上面三个必填项一样重；说明另占一整行 */
+.wd-grid label.wd-optional { color: var(--text-3); }
+.wd-grid .wd-span { grid-column: 1 / -1; margin-top: -2px; }
 .wd-actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
 
 /* ---------------- 操作日志 ---------------- */

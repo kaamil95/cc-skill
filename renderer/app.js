@@ -2390,6 +2390,16 @@ $('#btn-px-test').addEventListener('click', async () => {
   st.style.color = '';
   st.textContent = t('测试中…');
   const r = await api.invoke('proxy:test', { proxy: readProxyInputs() });
+  // 有 HTTP 响应就说明链路是通的：403 基本都是 GitHub 对匿名请求的限流（每小时 60 次，
+  // 走代理时出口 IP 共享，一测就撞上）。把它报成「连接失败」会让人白折腾代理设置。
+  if (r.ok && r.httpStatus) {
+    st.style.color = 'var(--warn-text)';
+    st.textContent = tf('链路通（{ms} ms），目标返回 HTTP {s}：多为 GitHub 匿名限流（每小时 60 次），在「发现」里填个 Token 即可', {
+      ms: r.ms,
+      s: r.httpStatus,
+    });
+    return;
+  }
   st.style.color = r.ok ? 'var(--ok-text)' : 'var(--err-text)';
   st.textContent = r.ok ? tf('连接正常（{ms} ms）', { ms: r.ms }) : t('连接失败：') + (r.error || '');
 });

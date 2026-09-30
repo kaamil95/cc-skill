@@ -288,8 +288,11 @@
             <input id="wd-user" class="input" autocomplete="off" placeholder="账号 / 应用密码专用账号" />
             <label data-i18n="密码">密码</label>
             <input id="wd-pass" type="password" class="input" autocomplete="new-password" placeholder="建议使用服务方签发的应用密码" />
-            <label data-i18n="远程目录">远程目录</label>
-            <input id="wd-path" class="input" placeholder="cc-skill-sync（无需以 / 开头）" />
+            <!-- 远程目录是可留空的一项：标签退一档，默认值写在下面的说明里，
+                 别让它跟上面三个必填项一样重 -->
+            <label class="wd-optional" data-i18n="远程目录">远程目录</label>
+            <input id="wd-path" class="input" placeholder="cc-skill-sync" />
+            <div class="hint wd-span" data-i18n="留空即用默认目录 cc-skill-sync（无需以 / 开头）；换一个目录就等于把备份放到云端的另一处。">留空即用默认目录 cc-skill-sync（无需以 / 开头）；换一个目录就等于把备份放到云端的另一处。</div>
           </div>
           <div class="wd-actions">
             <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--text-2)">
@@ -337,8 +340,9 @@
         <div class="form-label" style="margin-top:0" data-i18n="配置管理">配置管理</div>
         <div class="agent-block">
           <div class="wd-actions" style="margin-top:0">
-            <button class="btn sm" id="btn-cfg-export" data-i18n="导出到文件">导出到文件</button>
-            <button class="btn sm" id="btn-cfg-import" data-i18n="从文件导入">从文件导入</button>
+            <!-- 与顶栏的「导入 SKILL」区分开：那一个是装 SKILL 内容，这里是换整套配置 -->
+            <button class="btn sm" id="btn-cfg-export" data-i18n="导出配置到文件">导出配置到文件</button>
+            <button class="btn sm" id="btn-cfg-import" data-i18n="从文件导入配置">从文件导入配置</button>
             <label class="mc-check">
               <input type="checkbox" id="cfg-include-pass" />
               <span data-i18n="导出时包含 WebDAV 密码">导出时包含 WebDAV 密码</span>

@@ -265,10 +265,22 @@ function registerIpcHandlers({ getWindow, appDir, userData, applyProxy }) {
     await apply(proxy ? normalizeProxy({ ...saved, ...proxy }) : saved);
     const t0 = Date.now();
     try {
-      await httpGet('https://api.github.com/', { headers: { 'user-agent': 'cc-skill' }, timeoutMs: 15000 });
+      // 带上市场里配的 GitHub Token（有的话）。api.github.com 对匿名请求按**出口 IP**
+      // 限流（每小时 60 次），走代理时出口是共享节点，一测就是 403 —— 那看着像「代理不通」，
+      // 其实是 GitHub 拒了这个请求；带上 Token 才真的在测通路。
+      const ghToken = normalizeMarket(getConfig().market).token;
+      await httpGet('https://api.github.com/', {
+        headers: { 'user-agent': 'cc-skill', ...(ghToken ? { authorization: `Bearer ${ghToken}` } : {}) },
+        timeoutMs: 15000,
+      });
       return { ok: true, ms: Date.now() - t0 };
     } catch (err) {
-      return { ok: false, error: String((err && err.message) || err) };
+      const msg = String((err && err.message) || err);
+      // 拿到 HTTP 响应 = 请求确实到了对端，链路是通的，只是这个端点不肯给内容。
+      // 只有网络层错误（DNS / 连不上 / 超时）才算「代理不通」—— 两者混成一句会误导人。
+      const status = /^HTTP (\d{3})/.exec(msg);
+      if (status) return { ok: true, ms: Date.now() - t0, httpStatus: Number(status[1]) };
+      return { ok: false, error: msg };
     } finally {
       await apply(saved);
     }
