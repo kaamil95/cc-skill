@@ -261,6 +261,24 @@ test('新加的界面文案都有英文对照（英文环境下不会掉出中�
     '未被任何档案引用的备份',
     '这份备份来自「{name}」，不是本机。勾上表示这就是这台电脑（例如刚重装过系统），项目配置与 HOME 之外的目录会一并还原。',
     '未恢复 {n} 个项目配置：这份备份不算本机的。若这就是本机（例如刚重装过系统），重新打开弹窗勾选「这就是这台电脑」再来一次。',
+    // 总览的云端机器 / 设置的分类页签
+    '云端机器',
+    '刷新',
+    '管理',
+    '查看全部',
+    '共 {n} 台',
+    '未备份',
+    '已备份',
+    '备份已失效',
+    '云端还没有任何机器档案，上传一次备份就会出现这台机器。',
+    '已从云端读到 {n} 台机器 ✓',
+    '读取云端档案失败：',
+    '外观',
+    '云同步',
+    '机器',
+    '配置',
+    '网络',
+    '恢复默认只影响 Agents、SKILL 目录与项目列表，不会删除磁盘上的任何文件。',
   ]) {
     assert.ok(dict.includes(`'${key}':`) || dict.includes(`"${key}":`), 'i18n.js 缺少词条：' + key);
   }
@@ -389,4 +407,105 @@ test('目标目录换到项目里时，链接选项被禁掉并退回复制', ()
   assert.match(appJs, /\$\('#copy-dir'\)\._onPick = /, '目标目录变化时要重新判定');
   assert.match(appJs, /if \(el\._onPick\) el\._onPick\(value\)/, 'setPickerValue 要通知调用方');
   assert.match(appJs, /autoDowngraded = true/, '被自动降级的那次要记下来');
+});
+
+// ------------------------------ 总览：分区与云端机器 ---------------------------
+// 踩过：指标 / 分布 / 最近动态三者挤在同一张容器里靠细分隔线分节，动态与上面的数据
+// 连成一片，一屏扫下来分不出「哪块结束了」。现在每块各占一张卡，SKILL 网格仍排最后。
+test('总览每块内容各占一张卡，SKILL 网格仍排在最下面', () => {
+  assert.ok(!appJs.includes('class="overview"'), '旧的单容器三段式应当拆开');
+  assert.ok(/\.dash-card\s*\{/.test(css), '缺 .dash-card 样式');
+  const at = appJs.indexOf("$('#grid').innerHTML =");
+  const end = appJs.indexOf("$('#grid').onclick = onDashboardClick");
+  assert.ok(at > 0 && end > at, '找不到总览的拼装代码');
+  const expr = appJs.slice(at, end);
+  for (const key of ['overviewCard', 'activityCard']) assert.ok(expr.includes(key), '总览缺少 ' + key + ' 这一块');
+  assert.ok(expr.indexOf('overviewCard') < expr.indexOf('activityCard'), '最近动态要排在指标 / 分布那块之后');
+  assert.ok(expr.lastIndexOf('sections') > expr.indexOf('activityCard'), '全局 / 项目 SKILL 的网格仍要排在最后');
+  // 机器列表整块只在配了 WebDAV 时出现：没配就没什么可看的
+  assert.ok(expr.includes("webdavReady() ? machinesCardHTML() : ''"), '云端机器那块要按 WebDAV 是否配置来决定出不出');
+  assert.ok(/\.dash-machines\s*\{/.test(css), '缺机器列表的样式');
+});
+
+test('云端档案按需拉取：问过一次就不再问，失败也算问过', () => {
+  // 搜索框每敲一个字都会重画总览，而 sync:machines 是一次 PROPFIND + 每个侧车一次 GET。
+  // 失败若不当「问过」，WebDAV 地址写错 / 断网时就会每敲一个字重发一次（这条路上没有防抖）。
+  assert.match(appJs, /if \(!webdavReady\(\) \|\| state\.machinesLoading \|\| state\.machinesTried\) return;/, 'ensureMachines 要先看缓存再决定拉不拉');
+  assert.match(appJs, /state\.machinesTried = true;/, '问过就要落标记');
+  // 落标记的位置必须在成败分支之外，否则失败态又会每次重画都重发
+  const mark = appJs.indexOf('state.machinesTried = true;');
+  const branch = appJs.indexOf('if (r && r.ok) {', mark - 400);
+  assert.ok(branch > 0 && mark < branch, '「问过」的标记要写在成败分支之前（成功和失败都算问过）');
+  assert.match(appJs, /function invalidateMachines\(\)/, '云端变了要能作废这份缓存');
+  // 每条「云端变了」的路径都要作废，逐个盯住（只数调用次数会漏掉整条路径）
+  const near = (anchor, span = 300) => {
+    const i = appJs.indexOf(anchor);
+    assert.ok(i > 0, '找不到锚点，测试本身过期了：' + anchor);
+    return appJs.slice(i, i + span).includes('invalidateMachines()');
+  };
+  assert.ok(near("toast(t('已备份到云端 ✓'), 'ok');"), '手动备份之后没有作废机器列表缓存');
+  assert.ok(near('state.webdav = wdReadInputs();'), '保存 WebDAV 配置之后没有作废');
+  assert.ok(near('state.webdav = c.webdav;'), '自动备份之后没有作废');
+  assert.ok(near('// 文件里可能带了新的 WebDAV 地址', 260), '导入配置（可能换了服务器）之后没有作废');
+  assert.ok(near("api.invoke('sync:resetMachine')", 400), '重置本机标识之后没有作废');
+  assert.ok(near('// 刚恢复的这份备份可能就是本机', 140), '恢复完成之后没有作废');
+});
+
+test('总览一画的就先把机器列表拉起来，首帧不会先断言一句「云端还没有任何机器档案」', () => {
+  // 踩过：ensureMachines() 排在 innerHTML 赋值之后，第一帧会画出「云端还没有任何机器档案 /
+  // 共 0 台」—— 那是关于云端的事实，还没问过就不该说，而且这段时间「刷新」会被守卫早退。
+  const assign = appJs.indexOf("$('#grid').innerHTML =\n    overviewCard");
+  const ensure = appJs.indexOf('if (webdavReady()) ensureMachines();');
+  assert.ok(assign > 0 && ensure > 0, '找不到总览的拼装或拉取调用');
+  assert.ok(ensure < assign, 'ensureMachines() 要排在 innerHTML 赋值之前');
+});
+
+test('总览的最近动态随日志实时刷新', () => {
+  // 这块只在整页重画时才更新（而整页要等下次 scan），不在 log() 里推一把就会一直停在
+  // 「共 0 条」—— 今天装了个 SKILL，总览上却什么都没发生。
+  // 注意要断在调用点：`renderDashboardLogs()` 后面带分号才是调用，函数定义是 `() {`
+  assert.match(appJs, /renderDashboardLogs\(\);[\s\S]{0,120}log:append/, '写日志时要顺手刷总览那块');
+  assert.match(appJs, /function renderDashboardLogs\(\) \{[\s\S]{0,120}?if \(!box\) return;/, '总览不在屏幕上时什么都不做');
+  assert.match(appJs, /id="dash-logs"/, '动态容器要有 id');
+  assert.match(appJs, /id="dash-log-hint"/, '条数那行也要能单独刷（不然「共 0 条」会留着）');
+});
+
+test('机器卡片的三种状态各有形状与颜色，不是只靠文字', () => {
+  // 三个分支逐个钉住：改错映射（例如把「备份已失效」判成 ok）测试必须变红，
+  // 只断言函数存在是不够的
+  assert.match(appJs, /if \(!m\.backup \|\| !m\.backup\.created\) return \{ cls: '', label: t\('未备份'\) \};/, '没有备份 = 灰点 + 未备份');
+  assert.match(appJs, /if \(!m\.backup\.present\) return \{ cls: 'warn', label: t\('备份已失效'\) \};/, '备份已不在云端（被保留策略清掉）= 橙点 + 备份已失效');
+  assert.match(appJs, /return \{ cls: 'ok', label: t\('已备份'\) \};/, '备份在且最新 = 绿点 + 已备份');
+  for (const cls of ['', '.ok', '.warn']) assert.ok(css.includes('.machine-state' + cls), '缺状态胶囊样式：machine-state' + cls);
+  assert.match(css, /\.machine-dot\.ok\s*\{\s*background:\s*var\(--green\)/, '圆点要按状态上色（ok 用绿）');
+  assert.match(css, /\.machine-dot\.warn\s*\{\s*background:\s*var\(--orange\)/, '圆点要按状态上色（warn 用橙）');
+  assert.match(css, /\.machine-card\.self\s*\{/, '本机要能一眼分出来（强调色竖标）');
+  // 卡片与「云端机器档案」弹窗共用同一行文案，免得同一份数据两处各说各话
+  assert.match(appJs, /const line = machineBackupLine\(m\)/, '卡片要复用弹窗那行文案');
+});
+
+// ------------------------------ 设置：分类页签 ---------------------------------
+// 配置项越加越多，一列排到底就只能靠眼睛扫。按类别分页，一屏一类。
+test('设置按类别分页：页签、面板、app.js 的清单三处对得上', () => {
+  const ids = idsIn(html);
+  const tabs = [...html.matchAll(/data-set-tab="([a-z]+)"/g)].map((m) => m[1]);
+  assert.ok(tabs.length >= 4, '设置该按类别分页，实际只有 ' + tabs.length + ' 类');
+  const list = /const SET_TABS = \[([^\]]*)\]/.exec(appJs);
+  assert.ok(list, 'app.js 里应有 SET_TABS 清单');
+  const keys = [...list[1].matchAll(/'([a-z]+)'/g)].map((m) => m[1]);
+  assert.deepEqual(tabs, keys, '页签按钮与 SET_TABS 必须一一对应，否则某类永远切不到');
+  for (const k of keys) assert.ok(ids.has('set-pane-' + k), 'index.html 缺少 #set-pane-' + k + ' 面板');
+  assert.ok(tabs[0] === 'appear', '外观是最常改的一类，排在第一个');
+});
+
+test('设置的页签在 modal-body 之外，内容滚动时分类栏不跟着滚走', () => {
+  const from = html.indexOf('id="modal-settings"');
+  const tabsAt = html.indexOf('id="set-tabs"', from);
+  const bodyAt = html.indexOf('<div class="modal-body">', from);
+  assert.ok(from > 0 && tabsAt > from && bodyAt > from, '找不到设置弹窗的页签或内容区');
+  assert.ok(tabsAt < bodyAt, '页签要排在 modal-body 之前');
+  // 详情弹窗 / 市场弹窗也用 .tab 类，查询必须限定在 #set-tabs 内（跨弹窗撞类绑错处理器踩过一次）
+  assert.match(appJs, /\$\$\('#set-tabs \.tab'\)/, '页签查询要限定作用域');
+  assert.match(appJs, /classList\.toggle\('hidden', k !== key\)/, '切页签要收掉其他面板');
+  assert.match(appJs, /\$\('#set-pane-' \+ k\)/, '面板是 #set-pane-<分类>');
 });

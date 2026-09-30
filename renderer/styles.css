@@ -480,7 +480,7 @@ body[data-platform='darwin'] #topbar { padding-left: 84px; }
   margin: 28px 2px 12px;
 }
 /* 概览自带下边距，紧跟其后的分组标题不再重复留白 */
-#grid .overview + .section-head { margin-top: 0; }
+#grid .dash-card + .section-head { margin-top: 8px; }
 .section-head h3 { font-size: 16px; font-weight: 600; letter-spacing: -0.01em; }
 .section-head .chip { font-size: 11px; padding: 1.5px 8px; }
 .section-head .hint { margin-left: auto; }
@@ -949,16 +949,28 @@ select.input {
    「打开所在文件夹 / 删除」是同一件事，所以只留一个标记 */
 .link-here { font-size: 11.5px; color: var(--text-3); }
 
-/* ---------------- 总览：一张分组容器里的三段 ---------------- */
-/* 指标 / 分布 / 动态本来是三组各自带阴影的白卡，套在主区里就是「卡中卡」；
-   合并成一张容器、用细分隔线分节，层次由线而不是阴影表达 */
-.overview {
+/* ---------------- 总览：家底一张卡，动态与机器各占一块 ---------------- */
+/* 指标与分布仍在一张容器里靠细分隔线分节，最近动态与云端机器则各占一块 ——
+   早先动态也挤在那张容器里，和上面的数据连成一片，一屏扫下来分不出「哪块结束了」。
+   块与块之间只用留白断开，不再叠白卡，避免「卡中卡」。 */
+.dash-card {
   background: var(--panel);
   border-radius: var(--radius);
   box-shadow: var(--shadow-card);
-  margin-bottom: 24px;
+  margin-bottom: 16px;
   overflow: hidden;
 }
+.dash-head {
+  display: flex; align-items: center; gap: 10px;
+  padding: 13px 18px 11px;
+  border-bottom: 1px solid var(--hairline);
+}
+.dash-head h3 { font-size: 13.5px; font-weight: 600; letter-spacing: -0.01em; flex: none; }
+.dash-head .hint { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 只服务于致命错误卡（renderFatal）里的「重试 / 打开操作日志」，居中排在错误文案下方 */
+.dash-actions { display: flex; gap: 8px; justify-content: center; margin-top: 18px; }
+.dash-head-acts { margin-left: auto; display: flex; gap: 8px; align-items: center; flex: none; }
+
 .ov-stats { display: grid; grid-template-columns: repeat(6, 1fr); border-bottom: 1px solid var(--hairline); }
 .ov-stat { padding: 16px 18px; border-right: 1px solid var(--hairline); }
 .ov-stat:last-child { border-right: none; }
@@ -966,18 +978,69 @@ select.input {
 .ov-n.zero { color: var(--text-3); }  /* 0 不该和真实数据抢注意力 */
 .ov-n.warn { color: var(--warn-text); }
 .ov-label { font-size: 11.5px; color: var(--text-2); margin-top: 2px; }
-.ov-cols { display: grid; grid-template-columns: 1fr 1fr; border-bottom: 1px solid var(--hairline); }
-.ov-col { padding: 16px 18px; min-width: 0; }
+.ov-cols { display: grid; grid-template-columns: 1fr 1fr; }
+.ov-col { padding: 15px 18px; min-width: 0; }
 .ov-col + .ov-col { border-left: 1px solid var(--hairline); }
-.ov-activity { padding: 16px 18px; }
+.ov-activity { padding: 6px 18px 12px; }
 .ov-sec { font-size: 11px; font-weight: 600; color: var(--text-label); letter-spacing: 0.07em; margin-bottom: 8px; }
 @media (max-width: 900px) {
   .ov-stats { grid-template-columns: repeat(3, 1fr); }
+  .ov-stat:nth-child(3n) { border-right: none; }
+  .ov-stats .ov-stat:nth-child(-n + 3) { border-bottom: 1px solid var(--hairline); }
   .ov-cols { grid-template-columns: 1fr; }
   .ov-col + .ov-col { border-left: none; border-top: 1px solid var(--hairline); }
 }
-/* 只服务于致命错误卡（renderFatal）里的「重试 / 打开操作日志」，居中排在错误文案下方 */
-.dash-actions { display: flex; gap: 8px; justify-content: center; margin-top: 18px; }
+
+/* ---------------- 云端机器（总览里的一块） ---------------- */
+/* 一台机器一张卡：图标 + 名称 + 状态，是这台机器在云端那一份备份的入口。
+   整个 WebDAV 没配时这块不渲染（见 renderDashboard）。 */
+.dash-machines {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(310px, 1fr));
+  gap: 10px;
+  padding: 14px 18px 16px;
+}
+.dash-note { grid-column: 1 / -1; font-size: 12px; color: var(--text-3); padding: 6px 0; }
+.dash-note.err { color: var(--err-text); }
+.machine-card {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) auto;
+  gap: 11px;
+  align-items: center;
+  padding: 11px 12px;
+  border-radius: 11px;
+  background: var(--field);
+  box-shadow: 0 0 0 0.5px var(--hairline);
+  cursor: pointer;
+  transition: background 0.15s, box-shadow 0.15s;
+}
+.machine-card:hover { background: var(--field-hover); box-shadow: 0 0 0 0.5px var(--hairline-strong), var(--shadow-card); }
+/* 本机那道强调色竖标：和自己的备份一眼分得开 */
+.machine-card.self { box-shadow: inset 3px 0 0 var(--accent), 0 0 0 0.5px var(--hairline); }
+.machine-card.self:hover { box-shadow: inset 3px 0 0 var(--accent), 0 0 0 0.5px var(--hairline-strong), var(--shadow-card); }
+.machine-ico {
+  width: 38px; height: 38px; border-radius: 11px;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--fill-soft); color: var(--text-2);
+}
+.machine-card.self .machine-ico { background: var(--accent-soft); color: var(--accent); }
+.machine-card.idle .machine-ico { color: var(--text-3); }
+.machine-main { min-width: 0; }
+.machine-name { display: flex; align-items: center; gap: 6px; font-size: 13.5px; font-weight: 600; line-height: 1.35; }
+.machine-name .mc-tag { flex: none; }
+.machine-name b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.machine-host { font-family: var(--mono); font-size: 11px; color: var(--text-3); margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.machine-meta { display: flex; align-items: center; gap: 6px; margin-top: 3px; font-size: 11.5px; color: var(--text-2); min-width: 0; }
+/* 「最后备份 2026/9/30 20:45 · 42 个 SKILL · 3.0 MB」在 310px 的卡里一行放不下：
+   折成两行，别把结尾的「备份已不在云端」这类关键信息省略掉 */
+.machine-meta span:last-child { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.machine-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--text-3); box-shadow: inset 0 0 0 0.5px var(--dot-ring); }
+.machine-dot.ok { background: var(--green); }
+.machine-dot.warn { background: var(--orange); }
+.machine-state { flex: none; font-size: 11px; font-weight: 500; padding: 1.5px 8px; border-radius: 9px; background: var(--fill-soft); color: var(--text-2); }
+.machine-state.ok { color: var(--ok-text); background: var(--ok-soft); }
+.machine-state.warn { color: var(--warn-text); background: var(--warn-soft); }
+
 .dash-sec { font-size: 11px; font-weight: 600; color: var(--text-label); letter-spacing: 0.07em; margin-bottom: 8px; }
 .dash-row { display: flex; align-items: center; gap: 9px; padding: 7px 2px; font-size: 13px; border-bottom: 1px solid var(--hairline); }
 .dash-row:last-child { border-bottom: none; }
@@ -1013,6 +1076,14 @@ select.input {
 .btn.danger-solid:hover { background: var(--danger-solid-hover); }
 /* 通用确认弹窗的正文：白名单里的文案自带换行，用 pre-line 原样保留 */
 .cf-msg { font-size: 13px; color: var(--text-2); line-height: 1.65; white-space: pre-line; }
+
+/* 设置弹窗的分类页签：搬出 modal-body，内容区滚动时分类栏不跟着走。
+   每类一屏，不必在一整列里翻找 */
+.set-tabs { margin: 2px 20px 0; }
+/* 分类内容有长有短，给个下限免得切到短的一类时整个弹窗跟着缩一下（窗口最小高度 640，
+   640 - 80 的弹窗上限里还容得下这个下限） */
+.set-pane { padding-top: 12px; }
+#modal-settings .modal-body { min-height: 340px; }
 
 /* 设置里的滑杆行（弹窗遮罩） */
 .set-row { display: grid; grid-template-columns: 76px 1fr 54px; gap: 10px; align-items: center; margin-top: 8px; font-size: 12px; color: var(--text-2); }

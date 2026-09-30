@@ -212,14 +212,24 @@
     </div>
   </div>
 
-  <!-- 设置弹窗 -->
+  <!-- 设置弹窗：配置项按类别分页，一屏看一类 -->
   <div class="modal-overlay hidden" id="modal-settings">
     <div class="modal modal-wide">
       <div class="modal-head">
         <div class="modal-title" data-i18n="设置">设置</div>
         <button class="modal-close" id="set-close">×</button>
       </div>
+      <!-- 页签放在 modal-body 之外：内容滚动时分类始终可见。
+           顺序按使用频率排：外观最常改，网络最少动 -->
+      <div class="tabs set-tabs" id="set-tabs">
+        <button class="tab active" data-set-tab="appear" data-i18n="外观">外观</button>
+        <button class="tab" data-set-tab="sync" data-i18n="云同步">云同步</button>
+        <button class="tab" data-set-tab="machine" data-i18n="机器">机器</button>
+        <button class="tab" data-set-tab="config" data-i18n="配置">配置</button>
+        <button class="tab" data-set-tab="net" data-i18n="网络">网络</button>
+      </div>
       <div class="modal-body">
+        <div class="set-pane" id="set-pane-appear">
         <label class="form-label" style="margin-top:0" data-i18n="语言 / Language">语言 / Language</label>
         <select id="set-lang" class="input" style="width:auto">
           <option value="auto" data-i18n="跟随系统">跟随系统</option>
@@ -266,7 +276,10 @@
           <span class="set-val" id="set-overlay-dim-val"></span>
         </div>
         <div class="hint" style="margin-top:8px" data-i18n="调整弹窗背后空白的模糊与变暗程度，拖动即时预览。">调整弹窗背后空白的模糊与变暗程度，拖动即时预览。</div>
-        <div class="form-label" style="margin-top:18px" data-i18n="WebDAV 云同步">WebDAV 云同步</div>
+        </div>
+
+        <div class="set-pane hidden" id="set-pane-sync">
+        <div class="form-label" style="margin-top:0" data-i18n="WebDAV 云同步">WebDAV 云同步</div>
         <div class="agent-block" id="webdav-block">
           <div class="wd-grid">
             <label data-i18n="服务器地址">服务器地址</label>
@@ -294,7 +307,10 @@
           </div>
           <div class="hint" id="wd-status" style="margin-top:8px">备份内容 = 全局 + 项目内所有实体 SKILL（链接不会上传）；密码保存在本机配置文件中，请注意磁盘安全。</div>
         </div>
-        <div class="form-label" style="margin-top:18px" data-i18n="机器与配置">机器与配置</div>
+        </div>
+
+        <div class="set-pane hidden" id="set-pane-machine">
+        <div class="form-label" style="margin-top:0" data-i18n="机器与配置">机器与配置</div>
         <div class="agent-block">
           <div class="wd-grid">
             <label data-i18n="机器名">机器名</label>
@@ -310,6 +326,17 @@
           </div>
           <div class="wd-actions">
             <button class="btn sm" id="btn-mc-machines" data-i18n="云端机器档案">云端机器档案</button>
+          </div>
+          <div class="hint" style="margin-top:8px" data-i18n="机器标识决定「云端哪份备份是本机的」。重装系统后会生成新标识，恢复时勾一下「这就是这台电脑」即可认领回来；机器名只用于显示，随备份上传。">
+            机器标识决定「云端哪份备份是本机的」。重装系统后会生成新标识，恢复时勾一下「这就是这台电脑」即可认领回来；机器名只用于显示，随备份上传。
+          </div>
+        </div>
+        </div>
+
+        <div class="set-pane hidden" id="set-pane-config">
+        <div class="form-label" style="margin-top:0" data-i18n="配置管理">配置管理</div>
+        <div class="agent-block">
+          <div class="wd-actions" style="margin-top:0">
             <button class="btn sm" id="btn-cfg-export" data-i18n="导出到文件">导出到文件</button>
             <button class="btn sm" id="btn-cfg-import" data-i18n="从文件导入">从文件导入</button>
             <label class="mc-check">
@@ -317,11 +344,16 @@
               <span data-i18n="导出时包含 WebDAV 密码">导出时包含 WebDAV 密码</span>
             </label>
           </div>
-          <div class="hint" style="margin-top:8px" data-i18n="机器标识决定「云端哪份备份是本机的」。重装系统后会生成新标识，恢复时勾一下「这就是这台电脑」即可认领回来；机器名只用于显示，随备份上传。">
-            机器标识决定「云端哪份备份是本机的」。重装系统后会生成新标识，恢复时勾一下「这就是这台电脑」即可认领回来；机器名只用于显示，随备份上传。
+          <div class="hint" style="margin-top:8px" data-i18n="把 Agents、项目、WebDAV 配置导出为 JSON 文件随身携带；或通过 WebDAV 在多台设备间同步配置。">把 Agents、项目、WebDAV 配置导出为 JSON 文件随身携带；或通过 WebDAV 在多台设备间同步配置。</div>
+          <div class="settings-actions">
+            <button class="btn" id="btn-reset-agents" data-i18n="恢复默认">恢复默认</button>
+            <span class="hint" data-i18n="恢复默认只影响 Agents、SKILL 目录与项目列表，不会删除磁盘上的任何文件。">恢复默认只影响 Agents、SKILL 目录与项目列表，不会删除磁盘上的任何文件。</span>
           </div>
         </div>
-        <div class="form-label" style="margin-top:18px" data-i18n="网络代理">网络代理</div>
+        </div>
+
+        <div class="set-pane hidden" id="set-pane-net">
+        <div class="form-label" style="margin-top:0" data-i18n="网络代理">网络代理</div>
         <div class="agent-block">
           <div class="wd-grid">
             <label data-i18n="模式">模式</label>
@@ -343,8 +375,6 @@
             支持 http:// 与 socks5://，可写成 http://用户:密码@主机:端口。WebDAV 同步与 SKILL 市场都走这里；代理配置只存本机，不进云备份。
           </div>
         </div>
-        <div class="settings-actions">
-          <button class="btn" id="btn-reset-agents" data-i18n="恢复默认">恢复默认</button>
         </div>
       </div>
       <div class="modal-foot">

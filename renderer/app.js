@@ -17,6 +17,8 @@ const FOLDER_BIG = svgIcon(
   1.2
 );
 const SEARCH_BIG = svgIcon('<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>', 46, 1.2);
+// 总览「云端机器」卡片上的设备图标
+const DEVICE_SVG = svgIcon('<rect x="2.5" y="4" width="19" height="12.5" rx="2"/><path d="M8.5 20.5h7"/><path d="M12 16.5v4"/>', 17, 1.6);
 const CHECK_BIG = svgIcon('<circle cx="12" cy="12" r="9"/><path d="m8.5 12.5 2.5 2.5 5-5.5"/>', 40, 1.4);
 const WARN_BIG = svgIcon(
   '<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
@@ -57,7 +59,15 @@ const state = {
   machine: { id: '', name: '', hostname: '' },
   // 云端机器档案列表，以及待改名的目标（null = 改本机）
   machines: [],
+  // 总览那块机器列表的状态。云端档案是网络请求，不能每敲一个搜索字就重拉一遍：
+  // 问过一次（成功或失败）就记下 machinesTried，云端真变了再用 invalidateMachines() 作废
+  machinesLoading: false,
+  machinesTried: false,
+  machinesError: '',
+  machinesRemote: '',
   renameTarget: null,
+  // 设置弹窗当前停在的分类页签
+  settingsTab: 'appear',
   logFile: '',
 };
 
@@ -113,6 +123,8 @@ function log(msg, type = '') {
     state.unreadErrors++;
     updateLogBadge();
   }
+  // 总览上的「最近动态」直接跟着走：它现在独占一块，等下次整页重画就已经错过这一条了
+  renderDashboardLogs();
   api.invoke('log:append', { type, msg }).catch(() => {});
 }
 
@@ -666,18 +678,7 @@ function renderDashboard() {
         })
         .join('')
     : '<div class="hint" style="padding:8px 2px">' + t('还没有添加项目，点击左侧栏「＋ 添加项目」。') + '</div>';
-  const logRows = state.logs.length
-    ? state.logs
-        .slice(0, 3)
-        .map(
-          (e) => `<div class="dash-row">
-            <span class="log-time">${e.time.toLocaleTimeString('zh-CN', { hour12: false })}</span>
-            <span class="log-type ${e.type}">${e.type === 'err' ? t('错误') : e.type === 'ok' ? t('成功') : t('信息')}</span>
-            <span class="dash-sub" style="flex:1;white-space:normal">${esc(e.msg)}</span>
-          </div>`
-        )
-        .join('')
-    : '<div class="hint" style="padding:8px 2px">' + t('暂无操作记录；安装 / 合并 / 删除的结果都会记录在「操作日志」中。') + '</div>';
+  const logRows = logRowsHTML();
 
   const sections = [{ title: t('全局 SKILL'), tag: '', items: state.view.filter((s) => !s.project && match(s)) }]
     .concat(
@@ -690,10 +691,12 @@ function renderDashboard() {
     .filter((sec) => sec.items.length);
 
   $('#main-hint').textContent = '';
-  // 概览是一张分组容器里的三段（指标 / 分布 / 动态），靠细分隔线分节。
-  // 早先是 6 张独立卡 + 一层嵌套白块 + 一行与顶栏重复的动作按钮，层次全靠阴影堆。
-  const overview = `
-    <section class="overview">
+  // 指标与分布仍是同一张卡里的两段（它们是一回事：本机的家底），用细分隔线分节；
+  // 最近动态则单独成块 —— 早先它也挤在这张容器里，和上面的数据连成一片，
+  // 一屏扫下来分不出「哪块结束了」。云端机器同理，各占一块。
+  // 全局与项目 SKILL 的网格仍然排在最后。
+  const overviewCard = `
+    <section class="dash-card">
       <div class="ov-stats">
         ${tiles
           .map(
@@ -712,13 +715,27 @@ function renderDashboard() {
           ${projRows}
         </div>
       </div>
-      <div class="ov-activity">
-        <div class="ov-sec">${t('最近动态')} <span class="hint">（${tf('共 {n} 条', { n: state.logs.length })}，${t('详见操作日志')}）</span></div>
-        ${logRows}
-      </div>
     </section>`;
+  // 最近动态独占一块：它和上面的家底不是一类东西，连在一起看不出边界
+  const activityCard = `
+    <section class="dash-card">
+      <div class="dash-head">
+        <h3>${t('最近动态')}</h3>
+        <span class="hint" id="dash-log-hint">${tf('共 {n} 条', { n: state.logs.length })}</span>
+        <div class="dash-head-acts">
+          <button class="btn sm" id="btn-dash-log-more">${t('查看全部')}</button>
+        </div>
+      </div>
+      <div class="ov-activity" id="dash-logs">${logRows}</div>
+    </section>`;
+  // 先把拉取启动起来再画：machinesLoading 是同步置位的，所以首帧显示的就是「正在读取云端档案…」。
+  // 反过来先画再拉，第一帧会断言一句「云端还没有任何机器档案，上传一次备份就会出现这台机器。」
+  // —— 那是关于云端的事实，还没问过就不该说；这段时间里的「刷新」也会被守卫早退，像点不动。
+  if (webdavReady()) ensureMachines();
   $('#grid').innerHTML =
-    overview +
+    overviewCard +
+    (webdavReady() ? machinesCardHTML() : '') +
+    activityCard +
     (dangling ? `<div class="link-hint warn">${tf('⚠ 检测到 {n} 个失效链接（源已被删除），可在列表中筛选清理。', { n: dangling })}</div>` : '') +
     sections
       .map(
@@ -728,6 +745,134 @@ function renderDashboard() {
       )
       .join('');
   bindCards();
+  $('#grid').onclick = onDashboardClick;
+}
+
+/** 总览上的点击：机器列表的刷新 / 管理与「查看全部日志」都走事件代理（卡片会整块重画） */
+function onDashboardClick(e) {
+  if (e.target.closest('#btn-dash-machines-refresh')) return reloadMachines();
+  if (e.target.closest('#btn-dash-machines-manage') || e.target.closest('.machine-card')) return openMachines();
+  if (e.target.closest('#btn-dash-log-more')) return openLogs();
+}
+
+// ------------------------------ 总览：云端机器 --------------------------------
+// 远程设备列表的样子：一台机器一张卡，左边设备图标、右边状态胶囊，中间是名字 /
+// 主机名 / 最后一次备份。整块只在配了 WebDAV 时出现 —— 没配就没什么可看的。
+const webdavReady = () => !!(state.webdav && state.webdav.url);
+
+function machinesCardHTML() {
+  return `<section class="dash-card">
+    <div class="dash-head">
+      <h3>${t('云端机器')}</h3>
+      <span class="hint" id="dash-machines-hint">${esc(machinesHeadHint())}</span>
+      <div class="dash-head-acts">
+        <button class="btn sm" id="btn-dash-machines-refresh">${t('刷新')}</button>
+        <button class="btn sm" id="btn-dash-machines-manage">${t('管理')}</button>
+      </div>
+    </div>
+    <div class="dash-machines" id="dash-machines">${machinesInnerHTML()}</div>
+  </section>`;
+}
+
+// 「正在读」要判在「读失败」前面：在读的时候界面该说在读，而不是继续举着上一次的失败 ——
+// 点「刷新」之后还停在「✗ 读取失败」会让人以为按钮没反应
+function machinesHeadHint() {
+  if (state.machinesLoading) return t('正在读取云端档案…');
+  if (state.machinesError) return t('读取失败');
+  const n = tf('共 {n} 台', { n: state.machines.length });
+  return state.machinesRemote ? n + ' · ' + state.machinesRemote : n;
+}
+
+function machinesInnerHTML() {
+  if (!state.machines.length) {
+    if (state.machinesLoading) return `<div class="dash-note">${t('正在读取云端档案…')}</div>`;
+    if (state.machinesError) return `<div class="dash-note err">✗ ${esc(state.machinesError)}</div>`;
+    return `<div class="dash-note">${esc(t('云端还没有任何机器档案，上传一次备份就会出现这台机器。'))}</div>`;
+  }
+  return state.machines.map(machineCardHTML).join('');
+}
+
+/** 一台机器的备份状态：决定圆点与胶囊的颜色（cls 为空 = 云端还没有它的备份） */
+function machineState(m) {
+  if (!m.backup || !m.backup.created) return { cls: '', label: t('未备份') };
+  if (!m.backup.present) return { cls: 'warn', label: t('备份已失效') };
+  return { cls: 'ok', label: t('已备份') };
+}
+
+function machineCardHTML(m) {
+  const st = machineState(m);
+  const host = [m.hostname, m.machineId ? m.machineId.slice(0, 8) : ''].filter(Boolean).join(' · ');
+  // 与「云端机器档案」弹窗里同一行文案：一处改了另一处不会各说各话
+  const line = machineBackupLine(m);
+  return `<div class="machine-card${m.self ? ' self' : ''}${st.cls ? '' : ' idle'}" title="${esc(line)}">
+    <div class="machine-ico">${DEVICE_SVG}</div>
+    <div class="machine-main">
+      <div class="machine-name"><b>${esc(m.name)}</b>${m.self ? `<span class="mc-tag">${esc(t('本机'))}</span>` : ''}</div>
+      ${host ? `<div class="machine-host">${esc(host)}</div>` : ''}
+      <div class="machine-meta"><span class="machine-dot ${st.cls}"></span><span>${esc(line)}</span></div>
+    </div>
+    <span class="machine-state ${st.cls}">${esc(st.label)}</span>
+  </div>`;
+}
+
+/** 只重画总览这一块：加载态 / 结果 / 失败态都从这里过一道，别处不必知道细节 */
+function renderDashboardMachines() {
+  const box = $('#dash-machines');
+  if (!box) return;
+  box.innerHTML = machinesInnerHTML();
+  const hint = $('#dash-machines-hint');
+  if (hint) hint.textContent = machinesHeadHint();
+  const btn = $('#btn-dash-machines-refresh');
+  if (btn) btn.disabled = state.machinesLoading;
+}
+
+/** 懒加载：问过一次就不再问（搜索框每敲一个字都会重画总览，而这是一次网络请求） */
+async function ensureMachines() {
+  if (!webdavReady() || state.machinesLoading || state.machinesTried) return;
+  await loadMachines();
+}
+
+/** 手动「刷新」：作废缓存重拉。显式动作要给回音，所以这条路上有 toast */
+async function reloadMachines() {
+  if (state.machinesLoading) return;
+  state.machinesTried = false;
+  state.machinesLoading = true;
+  renderDashboardMachines(); // 先把「正在读取…」摆出来，别让按钮点下去像没反应
+  const r = await loadMachines();
+  if (r && r.ok) toast(tf('已从云端读到 {n} 台机器 ✓', { n: state.machines.length }), 'ok');
+  else toast(t('读取云端档案失败：') + state.machinesError, 'err');
+}
+
+/** 云端变了（备份 / 恢复 / 换身份 / 改 WebDAV 配置）之后，总览那块已经不准了 */
+function invalidateMachines() {
+  state.machinesTried = false;
+  if (state.filter === 'dashboard') renderGrid(); // 总览在屏幕上就顺手重取
+}
+
+// ------------------------------ 总览：最近动态 --------------------------------
+/** 只列最近 5 条，全量在「操作日志」里（见 openLogs） */
+function logRowsHTML() {
+  if (!state.logs.length)
+    return '<div class="hint" style="padding:8px 2px">' + t('暂无操作记录；安装 / 合并 / 删除的结果都会记录在「操作日志」中。') + '</div>';
+  return state.logs
+    .slice(0, 5)
+    .map(
+      (e) => `<div class="dash-row">
+        <span class="log-time">${e.time.toLocaleTimeString('zh-CN', { hour12: false })}</span>
+        <span class="log-type ${e.type}">${e.type === 'err' ? t('错误') : e.type === 'ok' ? t('成功') : t('信息')}</span>
+        <span class="dash-sub" style="flex:1;white-space:normal">${esc(e.msg)}</span>
+      </div>`
+    )
+    .join('');
+}
+
+/** 每来一条日志就单独刷这一块：这块不随整页重画，等下次渲染就漏掉刚才那条了 */
+function renderDashboardLogs() {
+  const box = $('#dash-logs');
+  if (!box) return;
+  box.innerHTML = logRowsHTML();
+  const hint = $('#dash-log-hint');
+  if (hint) hint.textContent = tf('共 {n} 条', { n: state.logs.length });
 }
 
 // ------------------------------ 详情 ----------------------------------------
@@ -1548,7 +1693,11 @@ function wdReadInputs() {
 }
 async function wdSave() {
   const r = await api.invoke('sync:setConfig', { webdav: wdReadInputs() });
-  if (r.ok) state.webdav = wdReadInputs();
+  if (r.ok) {
+    state.webdav = wdReadInputs();
+    // 换了服务器 / 目录，总览上那份机器列表就不是这一处的了
+    invalidateMachines();
+  }
   return r.ok;
 }
 $('#btn-wd-save').addEventListener('click', async () => {
@@ -1582,6 +1731,7 @@ $('#btn-wd-backup').addEventListener('click', async () => {
     const kb = r.size < 1048576 ? (r.size / 1024).toFixed(0) + ' KB' : (r.size / 1048576).toFixed(1) + ' MB';
     $('#wd-status').textContent = '✓ ' + tf('{name}（{count} 个 SKILL / {size}）', { name: r.name, count: r.count, size: kb });
     toast(t('已备份到云端 ✓'), 'ok');
+    invalidateMachines(); // 刚写了一份新快照，总览上「最后备份」那一行已经过期
   } else {
     $('#wd-status').textContent = '✗ ' + t('备份失败：') + r.error;
     toast(t('备份失败：') + r.error, 'err');
@@ -1624,6 +1774,8 @@ $('#btn-rename-go').addEventListener('click', async () => {
   toast(t('已改名 ✓'), 'ok');
   await refreshMachine();
   if (!$('#modal-machines').classList.contains('hidden')) await loadMachines();
+  // 名字写回了云端（本机名）或本机别名，总览那块上的名字跟着换
+  else invalidateMachines();
 });
 
 // 这个弹窗就是为了敲一个名字，回车即保存（和市场里的几个输入框一致）。
@@ -1646,6 +1798,7 @@ $('#btn-mc-reset').addEventListener('click', async () => {
   const r = await api.invoke('sync:resetMachine');
   if (!r.ok) return toast(r.error || t('重置失败'), 'err');
   await refreshMachine();
+  invalidateMachines(); // 换了标识，「本机」那一行该落到新档案上
   toast(t('已重置本机标识 ✓'), 'ok');
 });
 
@@ -1698,23 +1851,57 @@ $('#btn-cfg-import').addEventListener('click', async () => {
   if (!applied.ok) return toast(applied.error || t('导入失败'), 'err');
   await refreshMachine();
   await scan();
+  // 文件里可能带了新的 WebDAV 地址：换一台服务器后，旧服务器那份机器列表（连同远程路径）
+  // 一直挂在总览上是错的 —— 与「保存配置」那条路对齐（见 wdSave）
+  invalidateMachines();
   toast(applied.passwordCleared ? t('配置已导入 ✓（WebDAV 密码已清空，请重新填写）') : t('配置已导入 ✓'), applied.passwordCleared ? '' : 'ok');
 });
 
 // ------------------------------ 云端机器档案 ----------------------------------
+/**
+ * 拉一次云端档案，喂给「总览那块机器列表」和「云端机器档案」弹窗两处 ——
+ * 同一份远程数据不该拉两遍。
+ *
+ * 成功与失败都记「问过了」：失败若不记，WebDAV 地址写错或断网时，搜索框每敲一个字
+ * 都会重发一次 PROPFIND（而这条路上没有任何东西能拦住它）。要看最新的点「刷新」，
+ * 云端真变了的地方会调 invalidateMachines() 作废。
+ */
+async function fetchMachines() {
+  state.machinesLoading = true;
+  const r = await api.invoke('sync:machines');
+  state.machinesLoading = false;
+  state.machinesTried = true;
+  if (r && r.ok) {
+    state.machines = r.machines || [];
+    state.machinesRemote = r.remote || '';
+    state.machinesError = '';
+  } else {
+    state.machines = [];
+    state.machinesError = (r && r.error) || t('读取失败');
+  }
+  return r;
+}
+
+/** 弹窗入口：每次打开都重新拉（用户点开档案就是想看最新的），结果同步刷到总览那块 */
 async function loadMachines() {
   $('#mc-status').textContent = t('正在读取云端档案…');
-  const r = await api.invoke('sync:machines');
-  if (!r.ok) {
-    state.machines = [];
+  const r = await fetchMachines();
+  renderDashboardMachines();
+  if (!r || !r.ok) {
     $('#mc-list').innerHTML = '';
     $('#mc-orphan-box').hidden = true;
-    $('#mc-status').textContent = '✗ ' + (r.error || t('读取失败'));
-    return;
+    $('#mc-status').textContent = '✗ ' + state.machinesError;
+    return r;
   }
   state.machines = r.machines || [];
   $('#mc-status').textContent = r.remote ? tf('远程目录：{p}', { p: r.remote }) : '';
   renderMachines(r);
+  return r;
+}
+
+async function openMachines() {
+  openModal('modal-machines');
+  await loadMachines();
 }
 
 function machineBackupLine(m) {
@@ -1830,10 +2017,7 @@ async function onMachineAction(e) {
 
 $('#mc-list').addEventListener('click', onMachineAction);
 $('#mc-orphan-list').addEventListener('click', onMachineAction);
-$('#btn-mc-machines').addEventListener('click', async () => {
-  openModal('modal-machines');
-  await loadMachines();
-});
+$('#btn-mc-machines').addEventListener('click', openMachines);
 
 // 点击「从云端下载」：弹窗先行（瞬间可见）→ 后台只取廉价元数据 → 用户点确认后才真正下载整包
 let restoreSeq = 0;
@@ -1998,6 +2182,8 @@ $('#btn-restore-confirm').addEventListener('click', async () => {
     if (r.skippedAgents) toast(tf('未恢复 {n} 个未勾选 Agent 的 SKILL', { n: r.skippedAgents }), '');
     if (r.skippedInvalid) toast(tf('跳过 {n} 个路径非法的条目', { n: r.skippedInvalid }), 'err');
     if (r.appliedConfig) toast(t('配置也已恢复 ✓'), 'ok');
+    // 刚恢复的这份备份可能就是本机认领回来的那一台，总览上那几行已经不准了
+    invalidateMachines();
     // 备份里的地址与本机不同、包又不带密码 → 本机密码已清空，得让用户知道要重填
     if (r.passwordCleared) toast(t('WebDAV 地址来自备份，与本机密码不是一对，密码已清空 —— 请在设置里重新填写'), '');
     closeModal('modal-restore');
@@ -2118,7 +2304,25 @@ $('#set-accent').addEventListener('click', (e) => {
 });
 $('#set-accent-custom').addEventListener('input', (e) => previewTheme(readThemeInputs().theme, e.target.value));
 
-function openSettings() {
+// 设置面板按类别分页：配置项越来越多，一屏一类才找得到。
+// 页签在 modal-body 之外，内容滚动时分类栏不跟着走（见 index.html）
+const SET_TABS = ['appear', 'sync', 'machine', 'config', 'net'];
+
+function showSettingsTab(key) {
+  if (!SET_TABS.includes(key)) key = SET_TABS[0];
+  state.settingsTab = key;
+  $$('#set-tabs .tab').forEach((b) => b.classList.toggle('active', b.dataset.setTab === key));
+  SET_TABS.forEach((k) => $('#set-pane-' + k).classList.toggle('hidden', k !== key));
+  // 换一类就从头看：否则从「外观」滚到底再切「云同步」，会停在那一类的半截处
+  $('#modal-settings .modal-body').scrollTop = 0;
+}
+
+$('#set-tabs').addEventListener('click', (e) => {
+  const btn = e.target.closest('.tab');
+  if (btn) showSettingsTab(btn.dataset.setTab);
+});
+
+function openSettings(tab) {
   fillWebdavInputs(state.webdav);
   $('#set-lang').value = (state.ui && state.ui.lang) || 'auto';
   fillOverlayInputs(state.ui);
@@ -2128,6 +2332,8 @@ function openSettings() {
   themeSnapshot = readThemeInputs();
   fillProxyInputs(state.proxy);
   renderMachineLine();
+  // 默认停在上次看过的那一类（调用方要直达某一类时才传 key，如市场的「检查代理设置」）
+  showSettingsTab(tab || state.settingsTab);
   openModal('modal-settings');
 }
 
@@ -2240,7 +2446,7 @@ $('#btn-rescan').addEventListener('click', () => {
 $('#btn-dups').addEventListener('click', openDupsModal);
 $('#btn-logs').addEventListener('click', openLogs);
 $('#btn-new').addEventListener('click', openNewModal);
-$('#btn-settings').addEventListener('click', openSettings);
+$('#btn-settings').addEventListener('click', () => openSettings());
 $('#btn-open-logfile').addEventListener('click', () => {
   if (state.logFile) api.invoke('shell:openPath', { path: state.logFile });
 });
@@ -2341,7 +2547,7 @@ function mkFail(r) {
   if (btn) {
     btn.addEventListener('click', () => {
       closeModal('modal-market');
-      openSettings();
+      openSettings('net');
       setTimeout(() => $('#px-mode').focus(), 60);
     });
   }
@@ -2574,6 +2780,8 @@ api.onSyncAuto?.((r) => {
   toast(tf('已自动备份 {n} 个 SKILL ✓', { n: r.count }), 'ok');
   api.invoke('sync:getConfig').then((c) => {
     if (c && c.ok) state.webdav = c.webdav;
+    // 刚自动备份过一份，总览上的「最后备份 …」已经过期（手动备份那条路同理，见 btn-wd-backup）
+    invalidateMachines();
   });
 });
 

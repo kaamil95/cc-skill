@@ -557,6 +557,28 @@
       'The backup has {n} skills in directories this machine does not have configured:\n{p}\n\nThey were not written, because they are not part of this machine’s config. Confirm these directories belong to this machine (and are not another computer’s paths) to write them.',
     '确认并写入': 'Confirm and write',
     '正在写入本机配置之外的目录…': 'Writing to directories outside this machine’s config…',
+
+    // ---- 总览：云端机器 ----
+    '云端机器': 'Cloud machines',
+    '刷新': 'Refresh',
+    '管理': 'Manage',
+    '查看全部': 'View all',
+    '共 {n} 台': '{n} machines',
+    '未备份': 'No backup',
+    '备份已失效': 'Backup missing',
+    '已备份': 'Backed up',
+    '云端还没有任何机器档案，上传一次备份就会出现这台机器。': 'No machine profiles in the cloud yet — one shows up here after the first backup.',
+    '已从云端读到 {n} 台机器 ✓': 'Read {n} machines from the cloud ✓',
+    '读取云端档案失败：': 'Failed to read the cloud profiles: ',
+
+    // ---- 设置：分类页签 ----
+    '外观': 'Appearance',
+    '云同步': 'Cloud sync',
+    '机器': 'Machine',
+    '配置': 'Config',
+    '网络': 'Network',
+    '恢复默认只影响 Agents、SKILL 目录与项目列表，不会删除磁盘上的任何文件。':
+      'Resetting only affects agents, skill directories and the project list — nothing on disk is deleted.',
   };
 
   let lang = localStorage.getItem('cc-skill-lang') || 'auto';
