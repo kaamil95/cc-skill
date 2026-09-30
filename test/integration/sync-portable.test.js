@@ -63,6 +63,11 @@ after(() => {
 });
 
 test('备份包存的是 ~ 形式路径，不含上传机器的用户目录', async () => {
+  // 先起个名、给别的机器起个别名：这两样都不该随备份上云（别名是本机自己的显示信息；
+  // 机器名只走 manifest 顶层）
+  await app.invoke('sync:renameMachine', { machineId: app.readConfig().machineId, name: '我的台式机' });
+  await app.invoke('sync:renameMachine', { machineId: 'some-other-machine', name: '老笔记本' });
+
   const r = await app.invoke('sync:backup');
   assert.equal(r.ok, true, JSON.stringify(r));
   assert.equal(r.count, 3, '2 个全局 + 1 个项目');
@@ -82,6 +87,10 @@ test('备份包存的是 ~ 形式路径，不含上传机器的用户目录', as
   assert.equal(manifest.settings.machineId, undefined);
   // 但 manifest 要记下「打包的是哪台机器」——恢复时靠它判断能否连项目一起还原
   assert.equal(manifest.machineId, app.readConfig().machineId);
+  // 机器名只走顶层；别名压根不上云（它是本机给别人起的名字，跑到别的机器上没有意义）
+  assert.equal(manifest.settings.machineName, undefined, 'settings 里不该有机器名');
+  assert.equal(manifest.settings.machineNames, undefined, '别名不该随备份上云');
+  assert.equal(manifest.machineName, '我的台式机', '名字要在顶层，别的机器读侧车才看得到');
 
   const dests = manifest.targets.map((t) => t.destDir);
   for (const expected of ['~/.claude/skills', '~/.codex/skills']) {

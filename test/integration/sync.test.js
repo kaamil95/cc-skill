@@ -577,6 +577,52 @@ test('无主备份单独列出来，可逐个删掉', async () => {
   assert.equal((await app.invoke('sync:deleteBackup', { name: '../../evil.zip' })).ok, false);
 });
 
+test('侧车里的字段先归一化再用（别人写的、或坏掉的文件都可能）', async () => {
+  stub.writeJson('/dav/host-hostile.json', {
+    machineId: '../../etc/passwd',
+    machineName: 'x'.repeat(200),
+    hostname: '坏\u0000主机\n名',
+    name: '../../evil.zip',
+    created: 'y'.repeat(500),
+    entries: 'lots',
+  });
+
+  const r = await app.invoke('sync:machines');
+  assert.equal(r.ok, true, JSON.stringify(r));
+  const m = r.machines.find((x) => x.file === 'host-hostile.json');
+  assert.ok(m, '坏掉的侧车照样列出来 —— 它正是最该被清掉的那种');
+  assert.equal(m.machineId, '', '不合形状的标识当没有');
+  assert.equal(m.self, false, '标识非法就不可能是「本机」');
+  assert.equal(m.name.length, 40, '名字按机器名的规则限长');
+  assert.ok(
+    [...m.hostname].every((ch) => ch.codePointAt(0) >= 32 && ch.codePointAt(0) !== 127),
+    '控制字符要被换掉'
+  );
+  assert.equal(m.backup, null, '备份名不合形状 → 当成没有备份');
+  assert.ok(!r.orphans.includes('../../evil.zip'), '坏名字不该进无主备份列表');
+
+  stub.remove('/dav/host-hostile.json');
+});
+
+test('本机还没在这里备份过时，档案列表也补一行空的自己', async () => {
+  // 自己先换一个新标识：这样本机在云端就一定没有侧车（别依赖前面用例留下的状态）。
+  // 这一行要能一眼看出「我在不在这儿」，也留个改名的入口；它没有侧车文件，所以删不了
+  const fresh = await app.invoke('sync:resetMachine');
+  assert.equal(fresh.ok, true);
+  assert.ok(!stub.files.has('/dav/host-' + fresh.machineId + '.json'), '前提：云端没有这个标识的侧车');
+  // 顺便清掉名字（前面的用例改过名），这样断言才不依赖用例之间的顺序
+  await app.invoke('sync:renameMachine', { machineId: fresh.machineId, name: '' });
+
+  const r = await app.invoke('sync:machines');
+  assert.equal(r.ok, true, JSON.stringify(r));
+  const self = r.machines.filter((m) => m.self);
+  assert.equal(self.length, 1, '本机那一行要在，且只有一行');
+  assert.equal(self[0].machineId, fresh.machineId);
+  assert.equal(self[0].file, '', '没有侧车文件');
+  assert.equal(self[0].backup, null, '还没备份过');
+  assert.equal(self[0].name, os.hostname(), '没起过名就显示 hostname');
+});
+
 test('认领与重置本机标识', async () => {
   const before = app.readConfig().machineId;
   const adopted = await app.invoke('sync:adoptMachine', { machineId: 'foreign-machine' });
