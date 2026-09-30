@@ -4,7 +4,7 @@
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
-const { tempDir, expand, isTilde, toTilde } = require('./paths');
+const { tempDir, expand, isTilde, toTilde, removePath } = require('./paths');
 const { httpFetch } = require('./net');
 const { M } = require('./i18n');
 const { packZip, unpackZip } = require('./zip');
@@ -601,7 +601,8 @@ async function restoreApply({ name, agentIds }) {
       const destDir = expand(declared);
       const dest = path.join(destDir, e.folder);
       fs.mkdirSync(destDir, { recursive: true });
-      fs.rmSync(dest, { recursive: true, force: true });
+      // 恢复目标可能是一条链接：走 removePath，别顺着它把唯一副本的内容删了
+      removePath(dest);
       fs.cpSync(src, dest, { recursive: true });
       dests.add(destDir);
       restored++;

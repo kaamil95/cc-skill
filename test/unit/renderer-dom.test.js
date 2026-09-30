@@ -186,3 +186,113 @@ test('类选择器一律限定作用域（跨弹窗撞类会把处理器绑错�
   const unscoped = [...appJs.matchAll(/\$\$\('\.([a-zA-Z-]+)'\)/g)].map((m) => m[1]).filter((c) => !GLOBAL_OK.has(c));
   assert.deepEqual(unscoped, [], '这些类选择器没限定作用域：' + unscoped.join(', '));
 });
+
+// ------------------------------ 本体 / 链接的区分 ------------------------------
+// 踩过：链接安装与本体是同一个 accent 蓝底 🔗 徽章，只有一个「×N」之差，
+// 扫一眼根本分不出哪张卡片才是文件所在。区分必须靠形状，不能只靠文字。
+test('本体与链接用两套相反的视觉（实心 vs 虚线描边）', () => {
+  assert.match(appJs, /card-type canon/, '本体要有自己的徽章类');
+  assert.match(appJs, /card-type link/, '链接要有自己的徽章类');
+  assert.match(css, /\.card-type\.canon\s*\{[^}]*background:\s*var\(--accent\)/, '本体徽章应当是实心强调色');
+  assert.match(css, /\.card-type\.link\s*\{[^}]*dashed/, '链接徽章应当是虚线描边');
+});
+
+test('卡片左侧还有一道竖标（形状先于文字，不读字也能分）', () => {
+  assert.match(css, /\.card--canon::before/, '本体缺左侧实线竖标');
+  assert.match(css, /\.card--link::before/, '链接缺左侧虚线竖标');
+  assert.match(appJs, /' card--' \+ role/, '卡片应当按 linkRole 挂上对应的类');
+});
+
+test('卡片与详情描述的是「当前视图这一条」，不是背后的实体', () => {
+  // 列表标题写着「<Agent> 的 SKILL」，那卡片就该说这个 Agent 目录里是什么。
+  // 踩过：实体在 ~/.agents/skills（Codex/ZCode 共用），Claude Code 名下是链接，
+  // 在 Claude Code 视图里卡片却打着「本体」徽章，点删除还会把共用的实体删掉。
+  assert.match(appJs, /const entry = viewedEntry\(s, state\.filter\)/, 'cardHTML 要按当前筛选取这一条');
+  assert.match(appJs, /viewedEntry\(s, state\.filter\)/, 'openDetail 默认也要按当前筛选取这一条');
+});
+
+test('每一条删除路径都作用于当前视图这一条', () => {
+  // 踩过：详情弹窗里的删除改对了，卡片上那个内联「删除」按钮漏了 —— 在 Claude Code
+  // 视图里删一条链接，确认框写的却是「删除 SKILL…1 个 Agent 共用此唯一副本」，
+  // 按下去真把 .agents 里的实体删了。逐个入口盯住，别再漏第二个。
+  const args = [...appJs.matchAll(/(?<!function )deleteSkill\(([^)]*)\)/g)].map((m) => m[1].trim()).filter((a) => a && a !== 's, closeAfter = false'); // 去掉函数定义本身
+  assert.ok(args.length >= 2, '应当找到卡片与详情弹窗两处删除入口，实际：' + JSON.stringify(args));
+  for (const a of args) {
+    assert.match(a, /viewedEntry|detailEntry/, `这条删除路径没走当前视图这一条：deleteSkill(${a})`);
+  }
+});
+
+test('只通过链接出现的 Agent，芯片与实体所在的 Agent 长得不一样', () => {
+  // 一行芯片里「文件在这儿」和「只是链过来」原本完全一样，而卡片多半是被某个
+  // Agent 筛出来的 —— 芯片才是回答「那文件到底在哪」的地方。
+  assert.match(css, /\.chip\.link-chip\s*\{[^}]*dashed/, '链接芯片应当是虚线');
+  assert.match(appJs, /agentChipHTML/, '实体与链接芯片要由同一个函数分流');
+  assert.match(appJs, /linkOnlyAgentIds/, '芯片的链接判定要走 skillView');
+});
+
+test('skill-view.js 在 app.js 之前加载（app.js 顶部就解构它）', () => {
+  const at = html.indexOf('src="skill-view.js"');
+  const appAt = html.indexOf('src="app.js"');
+  assert.ok(at > 0 && appAt > 0 && at < appAt, 'skill-view.js 必须先于 app.js 引入');
+});
+
+test('新加的界面文案都有英文对照（英文环境下不会掉出中文）', () => {
+  const dict = read('renderer/i18n.js');
+  for (const key of ['本体', '{n} 个链接', '通过链接共用，文件不在这里', '共用', '项目 · {name}']) {
+    assert.ok(dict.includes(`'${key}':`) || dict.includes(`"${key}":`), 'i18n.js 缺少词条：' + key);
+  }
+});
+
+// ------------------------------ 目标目录选择器 --------------------------------
+// 原先用原生 <select>，选项只能写成 `~/.claude/skills · Claude Code` —— 路径在前、
+// Agent 在后，两段信息一样重，扫下来分不出哪个是 Agent 哪个是目录；共用的
+// ~/.agents/skills 还会在 Codex 和 ZCode 下各出现一次，看着像两条不同的目标。
+test('目标目录用自绘下拉，不再是原生 select', () => {
+  for (const id of ['copy-dir', 'new-dir', 'import-target', 'mk-target']) {
+    assert.match(html, new RegExp(`id="${id}" class="picker"`), `#${id} 应当是 .picker 容器`);
+    assert.ok(!html.includes(`<select id="${id}"`), `#${id} 不该还是原生 select`);
+  }
+});
+
+test('读目标目录一律走 pickerValue（.value 在 div 上是 undefined）', () => {
+  const raw = [...appJs.matchAll(/\$\('#(copy-dir|new-dir|import-target|mk-target)'\)\.value/g)];
+  assert.deepEqual(
+    raw.map((m) => m[1]),
+    [],
+    '这些地方还在读 .value：' + raw.map((m) => m[1]).join(', ')
+  );
+  assert.ok(appJs.includes('pickerValue('), 'app.js 里应有 pickerValue');
+});
+
+test('下拉弹层挂在 body 上（modal-body 是 overflow-y:auto，留在里面会被裁掉）', () => {
+  assert.match(css, /\.picker-pop\s*\{[^}]*position:\s*fixed/, '弹层需要 fixed 定位');
+  assert.match(appJs, /document\.body\.appendChild\(pickerPop\)/, '弹层要挂到 body 上');
+});
+
+test('弹窗关闭时收掉下拉弹层（它不在弹窗的 DOM 里，不会跟着隐藏）', () => {
+  assert.match(appJs, /const closeModal = \(id\) => \{[^}]*closePicker\(\)/s, 'closeModal 要先收掉弹层');
+});
+
+test('下拉打开时按 Esc 只收下拉，不连整个弹窗一起关掉', () => {
+  // document 上有一个「Esc 关掉所有弹窗」的处理器（见 app.js 的全局 keydown）。
+  // 下拉不拦住冒泡的话，按一下 Esc 连安装弹窗一起没了 —— 真机踩过。
+  assert.match(appJs, /e\.stopPropagation\(\);\s*closePicker\(\)/, '下拉的 Esc 要先 stopPropagation 再收自己');
+});
+
+// ------------------------------ 详情弹窗里的重复 ------------------------------
+test('「装到别处」只有一个入口（页签里那个按钮已合并进页脚）', () => {
+  // 原先链接页签里有个「＋ 安装链接到其他 Agent」，页脚还有个「复制到其他 Agent…」，
+  // 点开的是同一个弹窗，只是一个默认链接、一个默认复制 —— 同一个门的两个把手。
+  // 现在只留页脚那个，名字也改成中性的「安装到其他 Agent…」（弹窗里本来就能选方式）。
+  assert.ok(!html.includes('btn-add-link'), 'index.html 里不该再有 #btn-add-link');
+  assert.ok(!appJs.includes('btn-add-link'), 'app.js 里不该再引用 #btn-add-link');
+  assert.match(appJs, /t\('安装到其他 Agent…'\)/, '页脚按钮要用中性文案');
+});
+
+test('链接列表里属于当前条目的那一行不再重复给按钮', () => {
+  // 打开的就是一条链接时，那一行的路径 / Agent 芯片页头已经写过，
+  // 「打开 / 卸载」也和页脚的「打开所在文件夹 / 删除」是同一件事
+  assert.match(appJs, /state\.detailEntry/, '要能认出当前条目');
+  assert.match(appJs, /link-here/, '当前条目要有自己的标记');
+  assert.match(css, /\.link-here\s*\{/, '缺 .link-here 样式');
+});

@@ -492,6 +492,7 @@ body[data-platform='darwin'] #topbar { padding-left: 84px; }
   gap: 16px;
 }
 .card {
+  position: relative;
   background: var(--panel);
   border-radius: var(--radius);
   padding: 16px;
@@ -503,6 +504,21 @@ body[data-platform='darwin'] #topbar { padding-left: 84px; }
   transition: box-shadow 0.18s ease;
 }
 .card:hover { box-shadow: var(--shadow-card-hover); }
+/* 本体 / 链接的左侧竖标：形状先于文字 —— 实线是文件所在，虚线只是指向别处的一份引用。
+   上下留出圆角那一段，竖标才不会戳出卡片的圆角。 */
+.card--canon::before,
+.card--link::before,
+.card--dangling::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: var(--radius);
+  bottom: var(--radius);
+  border-left: 3px solid var(--accent);
+  border-radius: 2px;
+}
+.card--link::before { border-left: 3px dashed var(--hairline-strong); }
+.card--dangling::before { border-left: 3px dashed var(--warn-text); }
 .card-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .card-name { flex: 1; min-width: 0; font-size: 14px; font-weight: 600; letter-spacing: -0.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* 徽章独立成组靠右：挤在名称文字里会把名称挤断，也让卡片高度参差 */
@@ -513,7 +529,10 @@ body[data-platform='darwin'] #topbar { padding-left: 84px; }
   padding: 1.5px 7px; border-radius: 5px;
   background: var(--fill-soft); color: var(--text-2);
 }
-.card-type.link { background: var(--accent-soft); color: var(--accent); }
+/* 本体是实心徽章，链接是虚线描边 —— 两者原本是同一个 accent 蓝底 🔗 徽章，
+   除了一个「×N」什么也分不出来。带描边的徽章靠收窄内边距保持和实心的一样高。 */
+.card-type.canon { background: var(--accent); color: var(--on-accent); }
+.card-type.link { background: transparent; border: 1px dashed var(--hairline-strong); color: var(--text-2); padding: 0.5px 6px; }
 .card-type.warn { background: var(--warn-soft); color: var(--warn-text); }
 .card-desc {
   color: var(--text-2);
@@ -539,6 +558,13 @@ body[data-platform='darwin'] #topbar { padding-left: 84px; }
 }
 .chip .dot { width: 7px; height: 7px; border-radius: 50%; }
 .chip.proj-chip { background: var(--purple-soft); color: var(--purple-text); font-weight: 500; }
+/* 只通过链接出现的 Agent：虚线芯片 + 🔗 顶掉彩色圆点（圆点在这里会谎称文件就在那儿） */
+.chip.link-chip {
+  background: transparent;
+  border: 1px dashed var(--hairline-strong);
+  color: var(--text-3);
+  padding: 1.5px 7px 1.5px 6px;
+}
 /* 路径：占位常驻、hover 才淡入。必须常驻——否则 hover 时卡片变高，会把同一行
    其他卡片一起顶下去（grid 行高取最高者），鼠标划过整片区域都在跳 */
 .card-path {
@@ -652,6 +678,68 @@ select.input {
 }
 .radio-row { display: flex; gap: 20px; font-size: 13px; color: var(--text); margin-top: 2px; }
 .radio-row label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+
+/* ---------------- 目标目录选择器 ---------------- */
+/* 原生 <select> 的选项里塞不下「彩色圆点 + Agent 名 + 灰掉的目录」，只能三选一，
+   而「这是哪个 Agent 的哪个目录」正是这个控件唯一要回答的问题，所以自绘。
+   弹层挂在 body 上（见 app.js），因为 .modal-body 是 overflow-y:auto，留在里面会被裁掉。 */
+.picker { position: relative; }
+.picker-btn {
+  width: 100%; height: 34px;
+  display: flex; align-items: center;
+  padding: 0 28px 0 10px;
+  border-radius: 8px;
+  border: 1px solid var(--ring-strong);
+  background: var(--field) var(--chevron) no-repeat right 11px center;
+  color: var(--text); font-size: 13px; text-align: left;
+  cursor: pointer; outline: none;
+  transition: border-color 0.12s, box-shadow 0.12s;
+}
+.picker-btn:focus-visible,
+.picker[data-open='true'] .picker-btn { border-color: var(--accent); box-shadow: 0 0 0 3.5px var(--accent-soft); }
+.picker-face { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1; }
+.picker-agent { flex: none; font-weight: 500; white-space: nowrap; }
+.picker-dir {
+  flex: 1; min-width: 0;
+  font-size: 12px; color: var(--text-3);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* 弹层：fixed + 内联坐标，挂到 body 上 */
+.picker-pop {
+  position: fixed;
+  z-index: 80;
+  max-height: 300px; overflow-y: auto;
+  padding: 5px;
+  border-radius: 10px;
+  border: 1px solid var(--hairline);
+  background: var(--panel);
+  box-shadow: var(--shadow-pop);
+}
+.picker-group {
+  padding: 8px 8px 4px;
+  font-size: 10.5px; font-weight: 600; letter-spacing: 0.05em;
+  color: var(--text-label);
+}
+/* 选项是 <button>：Chromium 的默认样式会给它描边 + 立体底色，这里必须清掉，
+   否则一列带框的方块比原来的原生下拉更乱。选中态改用底色表达。 */
+.picker-opt {
+  width: 100%; display: flex; align-items: center; gap: 8px;
+  padding: 6px 8px; border: 0; border-radius: 6px;
+  background: transparent;
+  font-size: 13px; color: var(--text); text-align: left; cursor: pointer;
+  outline: none;
+}
+.picker-opt:hover,
+.picker-opt:focus-visible { background: var(--fill); }
+.picker-opt[aria-selected='true'] { background: var(--accent-soft); }
+.picker-opt[aria-selected='true'] .picker-agent { color: var(--accent); }
+.picker-opt .dot { flex: none; width: 8px; height: 8px; border-radius: 50%; }
+.picker-tag {
+  flex: none; padding: 1px 6px; border-radius: 5px;
+  font-size: 10.5px;
+  background: var(--fill-soft); color: var(--text-3);
+}
+.picker-empty { padding: 10px 8px; font-size: 12.5px; color: var(--text-3); }
 
 /* ---------------- 详情弹窗 ---------------- */
 .detail-meta {
@@ -855,6 +943,9 @@ select.input {
 .link-tag.bad { background: var(--err-soft); color: var(--err-text); }
 .link-path { flex: 1 1 auto; min-width: 60px; text-align: right; font-family: var(--mono); font-size: 11.5px; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .link-actions { display: flex; gap: 6px; flex: none; }
+/* 这一行就是当前打开的那一条：路径与 Agent 芯片页头已经写过，「打开 / 卸载」也和页脚的
+   「打开所在文件夹 / 删除」是同一件事，所以只留一个标记 */
+.link-here { font-size: 11.5px; color: var(--text-3); }
 
 /* ---------------- 总览：一张分组容器里的三段 ---------------- */
 /* 指标 / 分布 / 动态本来是三组各自带阴影的白卡，套在主区里就是「卡中卡」；

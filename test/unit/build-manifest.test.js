@@ -53,7 +53,7 @@ test('preload.js 依赖图上的每个本地模块都会被打包', () => {
 });
 
 test('渲染层文件都会被打包', () => {
-  for (const rel of ['renderer/index.html', 'renderer/app.js', 'renderer/i18n.js', 'renderer/styles.css']) {
+  for (const rel of ['renderer/index.html', 'renderer/app.js', 'renderer/i18n.js', 'renderer/styles.css', 'renderer/skill-view.js']) {
     assert.ok(fs.existsSync(path.join(ROOT, rel)), `缺少文件: ${rel}`);
     assert.ok(isPackaged(rel), `没被 build.files 覆盖: ${rel}`);
   }

@@ -8,6 +8,7 @@
   <script src="i18n.js"></script>
   <!-- 主题要在首帧之前套上，否则会先闪一下默认配色；见 renderer/theme.js -->
   <script src="theme.js"></script>
+  <script src="skill-view.js"></script>
 </head>
 <body>
   <!-- 顶栏 -->
@@ -116,16 +117,13 @@
         <div class="tab-panel hidden" id="panel-files"><ul class="file-list" id="detail-files"></ul></div>
         <div class="tab-panel hidden" id="panel-links">
           <div id="detail-links"></div>
-          <div class="edit-actions">
-            <button class="btn primary" id="btn-add-link" data-i18n="＋ 安装链接到其他 Agent">＋ 安装链接到其他 Agent</button>
-          </div>
         </div>
       </div>
       <div class="modal-foot">
         <button class="btn" id="btn-detail-open" data-i18n="打开所在文件夹">打开所在文件夹</button>
         <div class="foot-right">
           <button class="btn danger" id="btn-detail-delete" data-i18n="删除">删除</button>
-          <button class="btn primary" id="btn-detail-copy" data-i18n="复制到其他 Agent…">复制到其他 Agent…</button>
+          <button class="btn primary" id="btn-detail-copy" data-i18n="安装到其他 Agent…">安装到其他 Agent…</button>
         </div>
       </div>
     </div>
@@ -141,7 +139,7 @@
       <div class="modal-body">
         <div class="form-row" id="copy-src"></div>
         <label class="form-label" data-i18n="目标目录（全局 Agent 目录或项目目录）">目标目录（全局 Agent 目录或项目目录）</label>
-        <select id="copy-dir" class="input"></select>
+        <div id="copy-dir" class="picker"></div>
         <label class="form-label" data-i18n="安装方式">安装方式</label>
         <div class="radio-row">
           <label><input type="radio" name="copy-mode" value="copy" id="copy-mode-copy" checked /> <span data-i18n="复制副本">复制副本</span></label>
@@ -174,7 +172,7 @@
         <label class="form-label" data-i18n="描述（写清楚触发时机和用途，Agent 靠它决定何时使用）">描述（写清楚触发时机和用途，Agent 靠它决定何时使用）</label>
         <textarea id="new-desc" class="input" rows="3" data-i18n-ph="什么时候用这个 SKILL…"></textarea>
         <label class="form-label" data-i18n="创建位置（全局 Agent 目录或项目目录）">创建位置（全局 Agent 目录或项目目录）</label>
-        <select id="new-dir" class="input"></select>
+        <div id="new-dir" class="picker"></div>
       </div>
       <div class="modal-foot">
         <button class="btn" data-close="modal-new" data-i18n="取消">取消</button>
@@ -198,7 +196,7 @@
         <div id="import-preview" class="import-preview hidden"></div>
         <div id="import-form" class="hidden">
           <label class="form-label" data-i18n="安装位置（全局 Agent 目录或项目目录）">安装位置（全局 Agent 目录或项目目录）</label>
-          <select id="import-target" class="input"></select>
+          <div id="import-target" class="picker"></div>
           <label class="form-label" data-i18n="目标已存在同名 SKILL 时">目标已存在同名 SKILL 时</label>
           <div class="radio-row">
             <label><input type="radio" name="import-conflict" value="rename" checked /> 自动重命名（如 xxx-2）</label>
@@ -497,7 +495,7 @@
           </div>
           <div class="mk-pick-foot">
             <label data-i18n="安装到">安装到</label>
-            <select id="mk-target" class="input"></select>
+            <div id="mk-target" class="picker"></div>
           </div>
         </div>
       </div>

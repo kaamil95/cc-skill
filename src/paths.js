@@ -104,4 +104,46 @@ function sweepStaleTempDirs({ maxAgeMs = 3600000, matches = (name) => TEMP_DIR_R
   return removed;
 }
 
-module.exports = { ROOT, IS_WIN, LINK_TYPE, expand, isTilde, toTilde, basenameOf, ps, setTempDir, tempDir, sweepStaleTempDirs, resolveDataDir };
+/**
+ * 删除一个路径；是链接就只摘掉链接本身。
+ *
+ * 绝不能用 `fs.rmSync(p, { recursive: true })` 删链接：在 Electron 44 的 Node 上它会
+ * **顺着 junction 进到目标里去，把「唯一副本」的内容删光**，只留下一个空目录
+ * （真机踩过：卸载链接把 `~/.agents/skills/<skill>/SKILL.md` 删了，界面还报「唯一副本保留」。
+ * 系统 Node 24.13 上同一个调用是安全的，所以这个坑在 `node --test` 里测不出来）。
+ *
+ * `rmdir` 作用于重解析点本身，不会进去；POSIX 上的符号链接则要用 `unlink`。
+ */
+function removePath(p) {
+  let st;
+  try {
+    st = fs.lstatSync(p);
+  } catch (_) {
+    return; // 已经没了
+  }
+  if (st.isSymbolicLink()) {
+    try {
+      fs.rmdirSync(p); // Windows：junction / 目录符号链接
+    } catch (_) {
+      fs.unlinkSync(p); // POSIX 的符号链接，以及 Windows 上的文件符号链接
+    }
+    return;
+  }
+  fs.rmSync(p, { recursive: true, force: true });
+}
+
+module.exports = {
+  ROOT,
+  IS_WIN,
+  LINK_TYPE,
+  expand,
+  isTilde,
+  toTilde,
+  basenameOf,
+  ps,
+  setTempDir,
+  tempDir,
+  sweepStaleTempDirs,
+  resolveDataDir,
+  removePath,
+};

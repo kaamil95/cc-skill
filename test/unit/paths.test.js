@@ -148,3 +148,72 @@ test('sweepStaleTempDirs 在临时目录不存在时安静返回', () => {
     setTempDir(original);
   }
 });
+
+// ------------------------------ 删链接：绝不动唯一副本 ------------------------------
+// 真机踩过：卸载一条链接，`~/.agents/skills/<skill>/SKILL.md` 被一起删了，界面还报
+// 「唯一副本保留」。根因是 fs.rmSync({recursive:true}) 在 Electron 44 的 Node 上会
+// 顺着 junction 进到目标里去删。系统 Node 24.13 上同一个调用是安全的 ——
+// 也就是说光靠「跑一遍看目标还在不在」测不出这个 bug，所以下面额外盯住「没调 rmSync」。
+const { removePath } = require('../../src/paths');
+
+function makeLinkFixture() {
+  const root = tmpDir('cc-skill-rmlink-');
+  const target = path.join(root, 'target');
+  fs.mkdirSync(path.join(target, 'sub'), { recursive: true });
+  fs.writeFileSync(path.join(target, 'SKILL.md'), 'hello', 'utf8');
+  fs.writeFileSync(path.join(target, 'sub', 'a.txt'), 'x', 'utf8');
+  const link = path.join(root, 'link');
+  fs.symlinkSync(target, link, LINK_TYPE);
+  return { root, target, link };
+}
+
+test('removePath 摘掉链接，唯一副本的内容一个字都不能少', () => {
+  const { root, target, link } = makeLinkFixture();
+  try {
+    removePath(link);
+    assert.equal(fs.existsSync(link), false, '链接本身要被摘掉');
+    assert.deepEqual(fs.readdirSync(target).sort(), ['SKILL.md', 'sub'], '唯一副本的内容必须完好');
+    assert.equal(fs.readFileSync(path.join(target, 'SKILL.md'), 'utf8'), 'hello');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('removePath 删链接时不碰 rmSync（它在 Electron 上会删光目标）', () => {
+  const { root, target, link } = makeLinkFixture();
+  const realRm = fs.rmSync;
+  let rmCalled = false;
+  fs.rmSync = (...args) => {
+    rmCalled = true;
+    return realRm(...args);
+  };
+  try {
+    removePath(link);
+  } finally {
+    fs.rmSync = realRm;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+  assert.equal(rmCalled, false, '删链接走了 rmSync —— 在打包后的应用里这会把唯一副本删空');
+  assert.equal(fs.existsSync(target), false, '（夹具已随临时目录清理）');
+});
+
+test('removePath 对普通目录照旧递归删除', () => {
+  const root = tmpDir('cc-skill-rmdir-');
+  try {
+    fs.mkdirSync(path.join(root, 'd', 'sub'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'd', 'f.txt'), 'x', 'utf8');
+    removePath(path.join(root, 'd'));
+    assert.equal(fs.existsSync(path.join(root, 'd')), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('removePath 对已经不存在的路径安静返回', () => {
+  const root = tmpDir('cc-skill-rmgone-');
+  try {
+    removePath(path.join(root, 'nope'));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

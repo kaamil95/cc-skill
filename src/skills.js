@@ -2,7 +2,7 @@
 // 本模块不依赖 electron。
 const path = require('path');
 const fs = require('fs');
-const { expand, LINK_TYPE } = require('./paths');
+const { expand, LINK_TYPE, removePath } = require('./paths');
 const { getConfig, saveConfig, DEFAULT_AGENTS } = require('./config');
 
 // 项目内约定的 SKILL 目录：<project>/<sub>/skills
@@ -331,7 +331,8 @@ function copySkill({ srcPath, type, destDir, folderName, onConflict, agentId, mo
   let dest = type === 'folder' ? path.join(dd, folderName) : path.join(dd, folderName + '.md');
   if (fs.existsSync(dest)) {
     if (onConflict === 'overwrite') {
-      fs.rmSync(dest, { recursive: true, force: true });
+      // 目标可能是别人建的链接：走 removePath，别顺着它把唯一副本的内容删了
+      removePath(dest);
     } else if (onConflict === 'rename') {
       let i = 2;
       const tryName = (n) => (type === 'folder' ? path.join(dd, n) : path.join(dd, n + '.md'));
@@ -403,8 +404,9 @@ async function trashSkill(p, { trashItem }) {
     return { ok: false, error: '路径不存在' };
   }
   if (st.isSymbolicLink()) {
-    // 只删除链接本身，绝不动源 SKILL
-    fs.rmSync(abs, { recursive: true, force: true });
+    // 只删除链接本身，绝不动源 SKILL。必须走 removePath —— rmSync({recursive:true})
+    // 在 Electron 的 Node 上会顺着 junction 把源 SKILL 的内容删光
+    removePath(abs);
     return { ok: true, linkRemoved: true };
   }
   // Windows 上 trashItem 偶发返回 false 但实际已移入回收站：是否成功以磁盘实况为准

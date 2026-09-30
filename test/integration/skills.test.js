@@ -5,6 +5,7 @@ const path = require('path');
 const fs = require('fs');
 const { startApp } = require('../helpers/harness');
 const { writeSkill, writeFlatSkill, makeConfig, tmpDir } = require('../helpers/fixtures');
+const { LINK_TYPE } = require('../../src/paths');
 
 let app;
 let root;
@@ -140,6 +141,28 @@ test('skill:copy 复制模式：已存在时按 exists / rename / overwrite 处�
   });
   assert.equal(overwritten.ok, true);
   assert.ok(fs.existsSync(path.join(overwritten.dest, 'SKILL.md')));
+});
+
+test('skill:copy 覆盖安装到一条链接上：只替换链接，链接指向的唯一副本不受影响', async () => {
+  // 真机踩过：覆盖安装用 rmSync({recursive:true}) 清目标，而它在 Electron 的 Node 上
+  // 会顺着 junction 进到目标里去删 —— 一份被多个 Agent 共用的唯一副本就这样被清空了
+  const canonical = writeSkill(otherDir, 'overwrite-target');
+  const linkPath = path.join(agentDir, 'overwrite-target');
+  fs.symlinkSync(canonical, linkPath, LINK_TYPE);
+  const src = writeSkill(otherDir, 'overwrite-src');
+
+  const r = await app.invoke('skill:copy', {
+    srcPath: src,
+    type: 'folder',
+    destDir: agentDir,
+    folderName: 'overwrite-target',
+    onConflict: 'overwrite',
+  });
+  assert.equal(r.ok, true);
+  assert.equal(fs.lstatSync(r.dest).isSymbolicLink(), false, '覆盖后应当是一份真实副本，而不是链接');
+  assert.ok(fs.existsSync(path.join(r.dest, 'SKILL.md')));
+  assert.ok(fs.existsSync(path.join(canonical, 'SKILL.md')), '链接原先指向的唯一副本必须完好');
+  assert.match(fs.readFileSync(path.join(canonical, 'SKILL.md'), 'utf8'), /overwrite-target/);
 });
 
 test('skill:copy 链接模式：建链接、scan 标记 linked、删链接不动源', async () => {

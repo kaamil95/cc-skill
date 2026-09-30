@@ -35,6 +35,9 @@ const state = {
   filter: 'dashboard',
   search: '',
   detail: null,
+  // 详情弹窗当前代表的那一条磁盘记录（见 viewedEntry）：在 Agent 视图里可能是链接条目，
+  // 与 detail（整个技能的实体记录）不是同一个对象
+  detailEntry: null,
   // SKILL 内引用文件的预览栈：每层记下自己的目录，嵌套引用才解析得对
   refStack: [],
   importSrc: null,
@@ -52,6 +55,11 @@ const state = {
   market: { src: 'github', skills: [], selected: new Set(), active: null },
   logFile: '',
 };
+
+// 目标目录下拉的弹层状态。声明在这里而不是靠近实现，是为了让 closeModal 在
+// 任何时机都能安全调用 closePicker（`let` 在声明前是 TDZ，会直接抛错）
+let pickerPop = null;
+let pickerOpenEl = null;
 
 // ~ 形式 ↔ 本机绝对路径。三个函数都必须做分隔符边界判断：只比对前缀会把
 // C:\Users\kaix 误判成 C:\Users\kai 之下的 ~/x，而路径一旦这样写进配置就再也还原不回来。
@@ -191,7 +199,11 @@ function renderFatal(msg, retry) {
 
 // ------------------------------ 弹窗 ----------------------------------------
 const openModal = (id) => $('#' + id).classList.remove('hidden');
-const closeModal = (id) => $('#' + id).classList.add('hidden');
+const closeModal = (id) => {
+  // 下拉弹层挂在 body 上，不跟着弹窗一起隐藏 —— 弹窗关了要顺手收掉
+  closePicker();
+  $('#' + id).classList.add('hidden');
+};
 
 // 统一风格的确认弹窗（替代原生 confirm，样式与「从云端恢复」一致）。
 // 文案由调用方传入**已翻译**的成品字符串（调用点用的是 tf/t），这里不再过 t()。
@@ -415,26 +427,46 @@ function setFilter(f) {
 }
 
 // ------------------------------ 卡片 / 网格 ---------------------------------
+const { linkOnlyAgentIds, linkRole, viewedEntry } = window.skillView;
+
+// 实体所在的 Agent 是实心芯片 + 彩色圆点；只通过链接出现的 Agent 是虚线芯片 + 🔗。
+// 光靠卡片顶部的徽章不够：一行芯片里「文件在这儿」和「只是链过来」原本长得一模一样。
+function agentChipHTML(a, isLink) {
+  return isLink
+    ? `<span class="chip link-chip" title="${t('通过链接共用，文件不在这里')}">🔗 ${esc(a.name)}</span>`
+    : `<span class="chip"><span class="dot" style="background:${esc(a.color)}"></span>${esc(a.name)}</span>`;
+}
+
 function cardHTML(s) {
+  // 卡片描述的是「当前视图下这个 Agent 目录里的那一条」：在 Claude Code 视图里，
+  // 如果 Claude Code 名下是链接，这张卡就呈现成链接，而不是它背后那份实体。
+  // 芯片行照旧列全部 Agent 的真实情况，两者合起来才回答得了「文件到底在哪」。
+  const entry = viewedEntry(s, state.filter);
   // Agent 芯片最多显示 3 个，多的折成 +N：卡片一行放不下 7 个芯片，挤起来只会换行把高度搞乱
+  const linkIds = linkOnlyAgentIds(s);
   const agents = s.allAgentIds.map(agentById).filter(Boolean);
   const shown = agents.slice(0, 3);
   const chips = (s.project ? [`<span class="chip proj-chip" title="${esc(t('项目 SKILL') + ' · ' + s.project.name)}">${esc(s.project.name)}</span>`] : [])
-    .concat(shown.map((a) => `<span class="chip"><span class="dot" style="background:${esc(a.color)}"></span>${esc(a.name)}</span>`))
+    .concat(shown.map((a) => agentChipHTML(a, linkIds.has(a.id))))
     .concat(agents.length > shown.length ? [`<span class="chip">+${agents.length - shown.length}</span>`] : [])
     .join('');
   const type = s.type === 'file' ? `<span class="card-type">${t('单文件')}</span>` : '';
-  const linkBadge = s.dangling
-    ? `<span class="card-type warn" title="${t('源 SKILL 已被删除或移动')}">⚠ ${t('失效链接')}</span>`
-    : s.linked
-      ? `<span class="card-type link" title="${t('链接：只存一份，源更新即时生效')}">🔗 ${t('链接')}</span>`
-      : s.linkCount
-        ? `<span class="card-type link" title="${tf('{n} 个 Agent 通过链接共用此唯一副本', { n: s.linkCount })}">🔗×${s.linkCount}</span>`
-        : '';
-  const dirName = s.type === 'file' ? s.folder + '.md' : s.folder;
-  const pathText = s.dangling ? t('源已丢失') : s.linked ? '→ ' + shortPath(s.linkTarget || s.absPath) : dirName;
-  const pathTip = s.linked ? s.linkTarget || s.absPath : s.absPath;
-  return `<div class="card" data-key="${esc(s.key)}">
+  // 本体与链接刻意用两套相反的视觉：本体是实心徽章 + 卡片左侧实线（文件真在这儿），
+  // 链接是虚线描边 + 左侧虚线（这里只是指向别处的一份引用）。两处都靠形状区分而不只是
+  // 文字 —— 原先两者是同一个 accent 蓝底 🔗 徽章，扫一眼根本分不出来。
+  const role = linkRole(entry);
+  const linkBadge =
+    role === 'dangling'
+      ? `<span class="card-type warn" title="${t('源 SKILL 已被删除或移动')}">⚠ ${t('失效链接')}</span>`
+      : role === 'link'
+        ? `<span class="card-type link" title="${t('链接：只存一份，源更新即时生效')}">🔗 ${t('链接')}</span>`
+        : role === 'canon'
+          ? `<span class="card-type canon" title="${tf('{n} 个 Agent 通过链接共用此唯一副本', { n: entry.linkCount })}">${t('本体')} · ${tf('{n} 个链接', { n: entry.linkCount })}</span>`
+          : '';
+  const dirName = entry.type === 'file' ? entry.folder + '.md' : entry.folder;
+  const pathText = entry.dangling ? t('源已丢失') : entry.linked ? '→ ' + shortPath(entry.linkTarget || entry.absPath) : dirName;
+  const pathTip = entry.linked ? entry.linkTarget || entry.absPath : entry.absPath;
+  return `<div class="card${role === 'copy' ? '' : ' card--' + role}" data-key="${esc(s.key)}">
     <div class="card-top">
       <div class="card-name">${esc(s.name)}</div>
       <div class="card-badges">${type}${linkBadge}</div>
@@ -462,7 +494,10 @@ function bindCards() {
     });
     $('.act-del', card).addEventListener('click', (e) => {
       e.stopPropagation();
-      deleteSkill(s);
+      // 与卡片呈现保持一致：删的是当前视图这一条（在 Agent 视图里可能是链接），
+      // 而不是它背后那份实体 —— 否则确认框写「删除 SKILL…链接将失效」，
+      // 按下去删掉的却是别的 Agent 正在共用的实体
+      deleteSkill(viewedEntry(s, state.filter));
     });
   });
 }
@@ -689,30 +724,38 @@ function renderDashboard() {
 }
 
 // ------------------------------ 详情 ----------------------------------------
-function openDetail(s) {
+// s 是整个技能（实体记录，负责芯片行 / 链接页签 / 安装），entry 是当前视图下这一条
+// 磁盘记录（负责路径、提示条、打开文件夹、删除）。两者在「全部 SKILL」里是同一个对象；
+// 在某个 Agent 视图里、且该 Agent 名下是链接时才会分开。
+function openDetail(s, entry) {
+  const seen = entry || viewedEntry(s, state.filter);
   state.detail = s;
+  state.detailEntry = seen;
   state.refStack = [];
   $('#detail-title').textContent = s.name;
+  const linkIds = linkOnlyAgentIds(s);
   const chips = (s.project ? [`<span class="chip proj-chip">${esc(s.project.name)}</span>`] : [])
     .concat(
       s.allAgentIds.map((id) => {
         const a = agentById(id);
-        return a ? `<span class="chip"><span class="dot" style="background:${esc(a.color)}"></span>${esc(a.name)}</span>` : '';
+        return a ? agentChipHTML(a, linkIds.has(id)) : '';
       })
     )
     .join('');
-  $('#detail-meta').innerHTML = chips + `<span class="path" title="${esc(s.absPath)}">${esc(s.absPath)}</span>`;
-  $('#btn-detail-copy').textContent = s.project ? t('提取到全局…') : t('复制到其他 Agent…');
+  $('#detail-meta').innerHTML = chips + `<span class="path" title="${esc(seen.absPath)}">${esc(seen.absPath)}</span>`;
+  // 页脚那个按钮就是唯一的「装到别处」入口：安装弹窗里本来就能选复制还是链接，
+  // 页签里再放一个默认选链接的按钮，只是同一个弹窗的第二个门
+  $('#btn-detail-copy').textContent = s.project ? t('提取到全局…') : t('安装到其他 Agent…');
   const hint = $('#detail-hint');
-  if (s.dangling) {
+  if (seen.dangling) {
     hint.className = 'link-hint warn';
     hint.textContent = t('⚠ 此条目是失效链接：源 SKILL 已被删除或移动，可安全清理。');
-  } else if (s.linked) {
+  } else if (seen.linked) {
     hint.className = 'link-hint';
-    hint.textContent = tf('🔗 此条目是链接，唯一副本位于 {p}，在这里编辑即修改唯一副本。', { p: shortPath(s.linkTarget || '') });
-  } else if (s.linkCount) {
+    hint.textContent = tf('🔗 链接：文件不在这里，唯一副本位于 {p}；在这里编辑即修改唯一副本。', { p: shortPath(seen.linkTarget || '') });
+  } else if (seen.linkCount) {
     hint.className = 'link-hint';
-    hint.textContent = tf('🔗 此副本是唯一实体，另有 {n} 个 Agent 通过链接共用它；在这里更新，所有 Agent 即时生效。', { n: s.linkCount });
+    hint.textContent = tf('📦 本体：文件就在这个目录，另有 {n} 个 Agent 通过链接共用它；在这里更新，所有 Agent 即时生效。', { n: seen.linkCount });
   } else {
     hint.className = 'hidden';
     hint.textContent = '';
@@ -726,7 +769,7 @@ function openDetail(s) {
   $('#detail-files').innerHTML = '<li>' + t('加载中…') + '</li>';
   openModal('modal-detail');
 
-  api.invoke('skill:read', { path: s.skillMdPath }).then((r) => {
+  api.invoke('skill:read', { path: seen.skillMdPath }).then((r) => {
     if (r.ok) {
       $('#detail-md').innerHTML = api.md(r.body);
       $('#detail-editor').value = r.content;
@@ -734,9 +777,10 @@ function openDetail(s) {
       $('#detail-md').textContent = t('读取失败：') + (r.error || '');
     }
   });
-  api.invoke('skill:files', { dir: s.type === 'folder' ? s.absPath : s.parentDir, type: s.type }).then((r) => {
+  api.invoke('skill:files', { dir: seen.type === 'folder' ? seen.absPath : seen.parentDir, type: seen.type }).then((r) => {
     if (!r.ok || !r.files.length) {
-      $('#detail-files').innerHTML = `<li style="color:var(--text-3)">${s.type === 'file' ? t('单文件 SKILL（') + esc(s.folder) + '.md）' : t('空目录')}</li>`;
+      $('#detail-files').innerHTML =
+        `<li style="color:var(--text-3)">${seen.type === 'file' ? t('单文件 SKILL（') + esc(seen.folder) + '.md）' : t('空目录')}</li>`;
       return;
     }
     $('#detail-files').innerHTML = r.files
@@ -744,29 +788,31 @@ function openDetail(s) {
       .join('');
   });
   renderDetailLinks(s);
-  $('#btn-add-link').onclick = () => openCopyModal(s, true);
 }
 
 function renderDetailLinks(s) {
   const box = $('#detail-links');
   if (s.type !== 'folder') {
     box.innerHTML = '<div class="log-empty" style="padding:26px">' + t('单文件 SKILL 暂不支持链接安装') + '</div>';
-    $('#btn-add-link').disabled = true;
     return;
   }
-  $('#btn-add-link').disabled = false;
   if (!s.links || !s.links.length) {
     box.innerHTML =
       '<div class="log-empty" style="padding:30px">' +
       t('还没有安装任何链接') +
       '<br><span class="hint">' +
-      t('点下方「安装链接到其他 Agent」，即可让其他 Agent 共用这份唯一副本') +
+      t('点右下角「安装到其他 Agent…」，安装方式选「创建链接」，即可让其他 Agent 共用这份唯一副本') +
       '</span></div>';
     return;
   }
+  // 正在看的这一条本身就是链接时，它在列表里就是「你在这儿」：路径与 Agent 芯片页头
+  // 已经写过，打开/卸载也和页脚的「打开所在文件夹 / 删除」是同一件事，所以只留个标记，
+  // 不再重复给按钮
+  const here = state.detailEntry;
   box.innerHTML = s.links
-    .map(
-      (l) => `
+    .map((l) => {
+      const isHere = !!here && l.absPath === here.absPath;
+      return `
     <div class="link-row" data-path="${esc(l.absPath)}" data-dir="${esc(l.parentDir)}" data-name="${esc(l.name)}" data-canon-key="${esc(s.key)}">
       <span class="link-tag ${l.dangling ? 'bad' : ''}">${l.dangling ? '⚠ ' + t('失效') : t('正常')}</span>
       <span class="dup-agents">${l.agentIds
@@ -776,12 +822,14 @@ function renderDetailLinks(s) {
         })
         .join(' ')}</span>
       <span class="link-path" title="${esc(l.absPath)}">${esc(shortPath(l.absPath))}</span>
-      <span class="link-actions">
-        <button class="btn sm act-link-open">${t('打开')}</button>
-        <button class="btn sm danger act-link-uninstall">${t('卸载')}</button>
-      </span>
-    </div>`
-    )
+      <span class="link-actions">${
+        isHere
+          ? `<span class="link-here">${t('当前条目')}</span>`
+          : `<button class="btn sm act-link-open">${t('打开')}</button>
+        <button class="btn sm danger act-link-uninstall">${t('卸载')}</button>`
+      }</span>
+    </div>`;
+    })
     .join('');
 }
 
@@ -911,10 +959,15 @@ $('#btn-save-skill').addEventListener('click', async () => {
 });
 
 $('#btn-detail-open').addEventListener('click', () => {
-  api.invoke('shell:openPath', { path: state.detail.type === 'folder' ? state.detail.absPath : state.detail.parentDir });
+  // 打开的是「你现在看的这一条」，不是它背后那份实体 —— 在 Claude Code 视图里
+  // 点开一个链接，就该打开 Claude Code 目录里那个条目
+  const e = state.detailEntry || state.detail;
+  api.invoke('shell:openPath', { path: e.type === 'folder' ? e.absPath : e.parentDir });
 });
 
-$('#btn-detail-delete').addEventListener('click', () => deleteSkill(state.detail, true));
+// 删除同样只作用于当前视图这一条：在某个 Agent 视图里删掉一条链接，
+// 不该把别的 Agent 正在共用的实体一起删了
+$('#btn-detail-delete').addEventListener('click', () => deleteSkill(state.detailEntry || state.detail, true));
 $('#btn-detail-copy').addEventListener('click', () => openCopyModal(state.detail));
 
 async function deleteSkill(s, closeAfter = false) {
@@ -943,25 +996,179 @@ async function deleteSkill(s, closeAfter = false) {
 }
 
 // --------------------------- 目标目录选择（公用） ----------------------------
-function fillTargetSelect(sel, preferValue) {
-  const globalOpts = [];
+// 自绘的下拉，替代原生 <select>：原生选项里塞不下「圆点 + Agent 名 + 灰掉的目录」，
+// 而「这是哪个 Agent 的哪个目录」正是这个控件唯一要回答的问题。
+// 原先的 `~/.claude/skills · Claude Code` 是路径在前、Agent 在后，一行里两段信息
+// 一样重，扫下来分不出哪个是 Agent、哪个是目录，共用的 ~/.agents/skills 还会
+// 在 Codex 和 ZCode 下各出现一次，看着像两条不同的目标。
+
+/** 目录 → 读它的 Agent 数。>1 就是共用目录（如 ~/.agents/skills），要标出来 */
+function dirAgentCounts() {
+  const n = new Map();
+  for (const a of state.agents) for (const d of a.dirs || []) n.set(d, (n.get(d) || 0) + 1);
+  return n;
+}
+
+function targetGroups() {
+  const counts = dirAgentCounts();
+  const groups = [{ title: t('全局 · Agent 目录'), items: [] }];
   for (const a of state.agents) {
-    for (const d of a.dirs || []) globalOpts.push({ v: d, label: `${d} · ${a.name}` });
-  }
-  const projectOpts = [];
-  for (const p of state.projects) {
-    for (const sub of ['.claude', '.agents', '.zcode', '.codex', '.qoder']) {
-      projectOpts.push({ v: `${p.dir.replace(/[\\/]+$/, '')}/${sub}/skills`, label: `${sub}/skills · ${p.name}` });
+    for (const d of a.dirs || []) {
+      groups[0].items.push({ value: d, agent: a.name, color: a.color, dir: d, tag: (counts.get(d) || 0) > 1 ? t('共用') : '' });
     }
   }
-  const opt = (o) => `<option value="${esc(o.v)}">${esc(o.label)}</option>`;
-  sel.innerHTML =
-    `<optgroup label="${esc(t('全局 · Agent 目录'))}">${globalOpts.map(opt).join('')}</optgroup>` +
-    (projectOpts.length ? `<optgroup label="${esc(t('项目'))}">${projectOpts.map(opt).join('')}</optgroup>` : '');
-  if (preferValue && [...sel.querySelectorAll('option')].some((o) => o.value === preferValue)) {
-    sel.value = preferValue;
+  for (const p of state.projects) {
+    const items = ['.claude', '.agents', '.zcode', '.codex', '.qoder'].map((sub) => ({
+      value: `${p.dir.replace(/[\\/]+$/, '')}/${sub}/skills`,
+      agent: p.name,
+      color: '',
+      dir: `${sub}/skills`,
+      tag: '',
+    }));
+    groups.push({ title: tf('项目 · {name}', { name: p.name }), items });
   }
+  return groups.filter((g) => g.items.length);
 }
+
+const pickerValue = (el) => el.dataset.value || '';
+
+function pickerFaceHTML(o) {
+  if (!o) return `<span class="picker-dir">${esc(t('（没有可用的目标目录）'))}</span>`;
+  return `<span class="picker-face">
+      ${o.color ? `<span class="dot" style="background:${esc(o.color)}"></span>` : ''}
+      <span class="picker-agent">${esc(o.agent)}</span>
+      <span class="picker-dir" title="${esc(o.dir)}">${esc(shortPath(o.dir))}</span>
+    </span>`;
+}
+
+function fillTargetPicker(el, preferValue) {
+  const groups = targetGroups();
+  el._groups = groups;
+  el._opts = groups.flatMap((g) => g.items);
+  el.innerHTML = `<button type="button" class="picker-btn" aria-haspopup="listbox" aria-expanded="false"></button>`;
+  const wanted = preferValue && el._opts.some((o) => o.value === preferValue) ? preferValue : (el._opts[0] || {}).value;
+  setPickerValue(el, wanted);
+  el.querySelector('.picker-btn').onclick = (e) => {
+    e.stopPropagation();
+    el.dataset.open === 'true' ? closePicker() : openPicker(el);
+  };
+  el.querySelector('.picker-btn').onkeydown = (e) => {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      openPicker(el, e.key === 'ArrowDown' ? 0 : -1);
+    } else if (e.key === 'Escape' && el.dataset.open === 'true') {
+      // 同上：焦点还停在按钮上时按 Esc，也只收下拉
+      e.stopPropagation();
+      closePicker();
+    }
+  };
+}
+
+function setPickerValue(el, value) {
+  el.dataset.value = value || '';
+  const btn = el.querySelector('.picker-btn');
+  if (btn) btn.innerHTML = pickerFaceHTML(el._opts.find((o) => o.value === value));
+}
+
+// ------------------------------ 下拉弹层 ------------------------------------
+// 挂到 body 上而不是留在 .picker 里：modal-body 是 overflow-y:auto，留在里面会被裁掉
+function closePicker() {
+  if (pickerPop) pickerPop.remove();
+  pickerPop = null;
+  if (pickerOpenEl) pickerOpenEl.dataset.open = 'false';
+  if (pickerOpenEl) pickerOpenEl.querySelector('.picker-btn').setAttribute('aria-expanded', 'false');
+  pickerOpenEl = null;
+  document.removeEventListener('click', onPickerDocClick, true);
+  window.removeEventListener('scroll', placePicker, true);
+  window.removeEventListener('resize', placePicker);
+}
+
+function placePicker() {
+  if (!pickerPop || !pickerOpenEl) return;
+  const r = pickerOpenEl.querySelector('.picker-btn').getBoundingClientRect();
+  const h = pickerPop.offsetHeight;
+  const below = r.bottom + 4;
+  pickerPop.style.left = r.left + 'px';
+  pickerPop.style.width = r.width + 'px';
+  // 底下放不下就翻到上方，别让列表跑出屏幕
+  pickerPop.style.top = below + h > window.innerHeight - 8 && r.top - h - 4 > 8 ? r.top - h - 4 + 'px' : below + 'px';
+}
+
+function onPickerDocClick(e) {
+  if (pickerPop && pickerPop.contains(e.target)) return;
+  if (pickerOpenEl && pickerOpenEl.contains(e.target)) return;
+  closePicker();
+}
+
+function openPicker(el, focusIdx) {
+  closePicker();
+  const groups = el._groups || [];
+  pickerPop = document.createElement('div');
+  pickerPop.className = 'picker-pop';
+  pickerPop.setAttribute('role', 'listbox');
+  pickerPop.innerHTML = groups.length
+    ? groups
+        .map(
+          (g) =>
+            `<div class="picker-group">${esc(g.title)}</div>` +
+            g.items
+              .map(
+                (o) => `<button type="button" class="picker-opt" role="option" data-value="${esc(o.value)}"
+          aria-selected="${o.value === pickerValue(el)}">
+          ${o.color ? `<span class="dot" style="background:${esc(o.color)}"></span>` : ''}
+          <span class="picker-agent">${esc(o.agent)}</span>
+          <span class="picker-dir" title="${esc(o.dir)}">${esc(shortPath(o.dir))}</span>
+          ${o.tag ? `<span class="picker-tag">${esc(o.tag)}</span>` : ''}
+        </button>`
+              )
+              .join('')
+        )
+        .join('')
+    : `<div class="picker-empty">${esc(t('还没有配置任何 Agent 目录或项目'))}</div>`;
+  document.body.appendChild(pickerPop);
+  el.dataset.open = 'true';
+  el.querySelector('.picker-btn').setAttribute('aria-expanded', 'true');
+  pickerOpenEl = el;
+  placePicker();
+
+  pickerPop.onclick = (e) => {
+    const opt = e.target.closest('.picker-opt');
+    if (!opt) return;
+    setPickerValue(el, opt.dataset.value);
+    closePicker();
+    el.querySelector('.picker-btn').focus();
+  };
+  pickerPop.onkeydown = (e) => {
+    const opts = [...pickerPop.querySelectorAll('.picker-opt')];
+    const cur = opts.findIndex((o) => o === document.activeElement);
+    if (e.key === 'Escape') {
+      // 只关下拉，别让 Esc 继续冒泡到 document —— 那里有个「关掉所有弹窗」的处理器，
+      // 不拦住的话按一下 Esc 连整个安装弹窗一起没了
+      e.preventDefault();
+      e.stopPropagation();
+      closePicker();
+      el.querySelector('.picker-btn').focus();
+    } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      const next = e.key === 'ArrowDown' ? Math.min(cur + 1, opts.length - 1) : Math.max(cur - 1, 0);
+      opts[next]?.focus();
+    } else if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      document.activeElement?.click();
+    }
+  };
+  // 弹层里的方向键要能直接落上去，所以先给一个可聚焦元素
+  const opts = [...pickerPop.querySelectorAll('.picker-opt')];
+  const sel = opts.findIndex((o) => o.getAttribute('aria-selected') === 'true');
+  const start = focusIdx === 0 ? 0 : focusIdx === -1 ? opts.length - 1 : sel >= 0 ? sel : 0;
+  opts[start]?.focus();
+
+  document.addEventListener('click', onPickerDocClick, true);
+  // 弹层用 fixed 坐标，容器一滚就跟丢了 —— 跟着重新摆一次
+  window.addEventListener('scroll', placePicker, true);
+  window.addEventListener('resize', placePicker);
+}
+
 // --------------------------- 安装（复制 / 链接） -----------------------------
 function openCopyModal(s, preferLink = false) {
   const fromProject = !!s.project;
@@ -973,13 +1180,13 @@ function openCopyModal(s, preferLink = false) {
   if (linkAllowed && preferLink) $('#copy-mode-link').checked = true;
   else $('#copy-mode-copy').checked = true;
   const prefer = fromProject ? ((agentById(s.agentIds[0]) || {}).dirs || [])[0] : null;
-  fillTargetSelect($('#copy-dir'), prefer);
+  fillTargetPicker($('#copy-dir'), prefer);
   openModal('modal-copy');
   $('#btn-copy-go').onclick = () => doInstall(s, false);
 }
 async function doInstall(s, forceCopy) {
   let mode = forceCopy ? 'copy' : $('input[name=copy-mode]:checked').value;
-  const destDir = $('#copy-dir').value;
+  const destDir = pickerValue($('#copy-dir'));
   if (mode === 'link' && isProjectTarget(destDir)) {
     mode = 'copy';
     toast(t('项目目录通常是 Git 仓库，链接有误提交风险，已改为复制副本'));
@@ -1175,7 +1382,7 @@ async function performMerge(g, keepIdx) {
 function openNewModal() {
   $('#new-name').value = '';
   $('#new-desc').value = '';
-  fillTargetSelect($('#new-dir'));
+  fillTargetPicker($('#new-dir'));
   openModal('modal-new');
   setTimeout(() => $('#new-name').focus(), 50);
 }
@@ -1186,7 +1393,7 @@ $('#btn-new-go').addEventListener('click', async () => {
     toast(t('SKILL 名称只能包含英文、数字、- 和 _，且不超过 64 字符'), 'err');
     return;
   }
-  const destDir = $('#new-dir').value;
+  const destDir = pickerValue($('#new-dir'));
   const r = await api.invoke('skill:create', {
     destDir,
     folder: name,
@@ -1244,7 +1451,7 @@ $('#btn-pick-zip').addEventListener('click', async () => {
 
 $('#btn-import-go').addEventListener('click', async () => {
   if (!state.importSrc) return;
-  const destDir = $('#import-target').value;
+  const destDir = pickerValue($('#import-target'));
   const r = await api.invoke('skill:copy', {
     srcPath: state.importSrc.skillRoot,
     type: 'folder',
@@ -1698,7 +1905,7 @@ $('#btn-import').addEventListener('click', () => {
   $('#import-preview').classList.add('hidden');
   $('#import-form').classList.add('hidden');
   $('#btn-import-go').disabled = true;
-  fillTargetSelect($('#import-target'));
+  fillTargetPicker($('#import-target'));
   openModal('modal-import');
 });
 
@@ -1741,7 +1948,7 @@ function openMarket() {
   mkStatus('');
   selectMkSource('github');
   showMkStep('find');
-  fillTargetSelect($('#mk-target'));
+  fillTargetPicker($('#mk-target'));
   openModal('modal-market');
 }
 
@@ -1948,7 +2155,7 @@ $('#mk-back').addEventListener('click', () => {
 });
 
 $('#mk-install').addEventListener('click', async () => {
-  const destDir = $('#mk-target').value;
+  const destDir = pickerValue($('#mk-target'));
   if (!destDir) return toast(t('请先选择安装位置'), 'err');
   const picked = state.market.skills.filter((s) => state.market.selected.has(s.absPath));
   if (!picked.length) return;
