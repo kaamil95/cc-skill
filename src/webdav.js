@@ -206,6 +206,11 @@ async function uploadSnapshot(items) {
       }
       targets.get(s.parentDir).count++;
     }
+    // 随包上传的设置。机器名走 manifest 顶层、别名（本机给别的机器起的名字）压根不上云 ——
+    // 它是本机自己的显示信息，随备份跑到别的机器上没有意义
+    const settings = buildConfigPayload(true).config;
+    delete settings.machineName;
+    delete settings.machineNames;
     const manifest = {
       app: 'CC Skill',
       manifestVersion: 1,
@@ -215,7 +220,7 @@ async function uploadSnapshot(items) {
       // 注意它只是来源信息，不进 settings——那才是会被恢复覆盖的配置。
       machineId: getConfig().machineId || '',
       machineName: machineDisplayName(),
-      settings: buildConfigPayload(true).config,
+      settings,
       targets: [...targets.values()],
       entries: items.map((s) => ({ target: targets.get(s.parentDir).id, folder: s.folder })),
     };
@@ -289,13 +294,8 @@ async function uploadSnapshot(items) {
     try {
       const { backups, sidecars } = await listRemote(cfg);
       const keep = new Set([name]);
-      for (const f of sidecars) {
-        try {
-          const meta = JSON.parse(await (await davRequest(cfg, 'GET', davUrl(cfg, f))).text());
-          if (meta && meta.name) keep.add(meta.name);
-        } catch (_) {
-          /* 读不到就只保住自己这份 */
-        }
+      for (const { meta } of await readSidecars(cfg, sidecars)) {
+        if (meta && meta.name) keep.add(meta.name);
       }
       for (const old of backups.slice(0, Math.max(0, backups.length - 10))) {
         if (keep.has(old)) continue;
@@ -432,24 +432,40 @@ const normPath = (p) =>
     .replace(/\/+$/, '')
     .toLowerCase();
 
+// 声明路径里有没有 .. 段。备份包是外来输入，任何需要 .. 的目标目录都当非法数据：
+// expand('~/../..') 会落到 home 之外，等于把「写哪儿」交给包决定。
+const hasDotDot = (p) =>
+  String(p || '')
+    .split(/[\\/]+/)
+    .includes('..');
+
 /**
- * 本机真正在用的 SKILL 目录（Agent 目录展开成绝对路径后的集合）。
- * 用来判断备份里那条绝对路径是不是「本机自己的目录」——见 restoreApply 里的三条路。
- *
- * fromBackup 传备份自己的 config.json 里的 Agent 目录（仅在「本机自己的备份」时才传）：
- * 重装系统后本机配置是空的，自定义的 Agent 目录一个都不剩，可那些目录正是要恢复的目标。
- * 少了这一项，认领之后还得再恢复一次才能把 SKILL 装回去。
+ * 备份包里声明的 Agent 目录，只留下「本机用得上」的那些。
+ * ~ 形式在哪儿都有意义；绝对路径则必须已经在本机配置里（knownDirs），或这一轮真的落过地
+ * （dests，也就是用户确认过的那批）。否则一份外来备份就能把任意绝对路径并进本机配置，
+ * 而配置里的目录在**下一次**恢复时会被当成「本机的」—— 正好绕过那道用户确认。
  */
-function localSkillDirs(fromBackup) {
+function keepUsableDirs(agents, knownDirs, dests) {
+  return (agents || []).map((a) => ({
+    ...a,
+    dirs: ((a && a.dirs) || []).filter((d) => isTilde(d) || knownDirs.has(normPath(d)) || dests.has(expand(d))),
+  }));
+}
+
+/**
+ * 本机配置里在用的 SKILL 目录（Agent 目录展开成绝对路径后的集合）。
+ * 这是绝对路径能不能落地的**唯一**依据之一 —— 另一条依据是用户这次明确点头
+ * （restoreApply 的 allowExternalDirs）。刻意不接受「备份包自己声明的目录」：
+ * destDir 与包内 agents[].dirs 同出一包，让它们互相印证等于自证。
+ */
+function localSkillDirs() {
   const dirs = new Set();
-  const add = (list) => {
-    for (const d of list || []) {
+  for (const a of getConfig().agents || []) {
+    for (const d of (a && a.dirs) || []) {
       const abs = expand(d);
       if (abs) dirs.add(normPath(abs));
     }
-  };
-  for (const a of getConfig().agents || []) add(a && a.dirs);
-  for (const a of fromBackup || []) add(a && a.dirs);
+  }
   return dirs;
 }
 
@@ -490,9 +506,32 @@ function hostMetaFile() {
 async function listRemote(cfg) {
   const xml = await (await davRequest(cfg, 'PROPFIND', davUrl(cfg, ''), { headers: { Depth: '1' } })).text();
   return {
-    backups: [...new Set(xml.match(/cc-skill-backup-[^<>]*?[.]zip/g) || [])].sort(),
-    sidecars: [...new Set(xml.match(/host-[^<>/]*?[.]json/g) || [])],
+    // 这两个名字都直接取自服务端返回的 XML，所以必须按形状过滤后再交给任何人用：
+    // 一个说谎的服务器可以在 href 里塞 `cc-skill-backup-x/../../whatever.zip`，
+    // 而下面的 `..` 会被 URL 解析折叠掉 —— 等于让它指定客户端去 DELETE 同主机上别的路径。
+    // BACKUP_NAME_RE / SIDECAR_FILE_RE 都不含路径分隔符，这类名字一律进不来。
+    backups: [...new Set(xml.match(/cc-skill-backup-[^<>]*?[.]zip/g) || [])].filter((n) => BACKUP_NAME_RE.test(n)).sort(),
+    sidecars: [...new Set(xml.match(/host-[^<>/]*?[.]json/g) || [])].filter((n) => SIDECAR_FILE_RE.test(n)),
   };
+}
+
+/**
+ * 读云端所有侧车。读不到或坏掉的一律以 meta=null 记着 —— 调用方要能区分
+ * 「这台机器没有档案」与「档案坏了」，后者正是最该被清掉的那种。
+ */
+async function readSidecars(cfg, files) {
+  const out = [];
+  for (const file of files) {
+    let meta = null;
+    try {
+      const parsed = JSON.parse(await (await davRequest(cfg, 'GET', davUrl(cfg, file))).text());
+      if (parsed && typeof parsed === 'object') meta = parsed;
+    } catch (_) {
+      /* 坏掉的侧车照样列出来，好让用户能删 */
+    }
+    out.push({ file, meta });
+  }
+  return out;
 }
 
 // 列云端所有备份名（PROPFIND 列目录，按文件名时间戳排序）
@@ -604,18 +643,16 @@ async function listMachines() {
   const aliases = normalizeMachineNames(getConfig().machineNames);
   const machines = [];
   const referenced = new Set();
-  for (const file of sidecars) {
-    let meta = null;
-    try {
-      meta = JSON.parse(await (await davRequest(cfg, 'GET', davUrl(cfg, file))).text());
-    } catch (_) {
-      /* 坏掉的侧车照样列出来——它正是最该被清掉的那种 */
-    }
-    const machineId = String((meta && meta.machineId) || '');
+  // 侧车里的每个字段都来自云端（可能是别人写的、也可能是坏文件），一律先归一化再往下用：
+  // 标识按形状校验、名字/主机名按机器名的规则限长去控制字符、备份名按备份名的形状校验
+  for (const { file, meta } of await readSidecars(cfg, sidecars)) {
+    const rawId = String((meta && meta.machineId) || '');
+    const machineId = MACHINE_ID_RE.test(rawId) ? rawId : '';
     const self = !!machineId && machineId === mine;
     const selfName = normalizeMachineName(meta && meta.machineName);
-    const hostname = String((meta && meta.hostname) || '');
-    const backupName = String((meta && meta.name) || '');
+    const hostname = normalizeMachineName(meta && meta.hostname);
+    const rawBackup = String((meta && meta.name) || '');
+    const backupName = BACKUP_NAME_RE.test(rawBackup) ? rawBackup : '';
     if (backupName && backups.includes(backupName)) referenced.add(backupName);
     machines.push({
       file,
@@ -673,7 +710,9 @@ async function forgetMachine({ file, deleteBackups = false } = {}) {
   } catch (_) {
     /* 读不到也允许删：坏掉的侧车正是最该清掉的 */
   }
-  if (meta && meta.machineId && meta.machineId === getConfig().machineId) {
+  // 本机自己的档案不给删：下一次备份会立刻写回来，要换身份请走认领或「重置标识」。
+  // 文件名也兜一道 —— 侧车坏掉读不出 machineId 时，只比标识的保护会静默失效
+  if (file === hostMetaFile() || (meta && meta.machineId && meta.machineId === getConfig().machineId)) {
     return {
       ok: false,
       reason: 'self',
@@ -705,7 +744,7 @@ async function deleteBackup({ name } = {}) {
 // 恢复第二步（点击「确认恢复」后才会调用）：下载 → 解压 → 校验 manifest → 覆盖还原 SKILL 与配置
 // 下载或校验失败时不会落地任何文件，本地数据不受影响。
 // 只还原全局 SKILL：项目级 SKILL 随项目仓库走，在这里落地只会写进一个没人读的目录。
-async function restoreApply({ name, agentIds, adoptMachine = false }) {
+async function restoreApply({ name, agentIds, adoptMachine = false, allowExternalDirs = false }) {
   const cfg = webdavCfg();
   if (!cfg.url) return { ok: false, error: M('请先填写 WebDAV 配置', 'Please fill in the WebDAV config first') };
   if (!BACKUP_NAME_RE.test(String(name || ''))) {
@@ -716,6 +755,9 @@ async function restoreApply({ name, agentIds, adoptMachine = false }) {
   }
   if (adoptMachine !== undefined && adoptMachine !== null && typeof adoptMachine !== 'boolean') {
     return { ok: false, error: M('认领参数不合法', 'Invalid adopt flag') };
+  }
+  if (allowExternalDirs !== undefined && allowExternalDirs !== null && typeof allowExternalDirs !== 'boolean') {
+    return { ok: false, error: M('外部目录授权参数不合法', 'Invalid external-directory flag') };
   }
   // 显式传空数组 = 一个 Agent 都不选：整次恢复都是空操作，连配置也不该动。
   // 不这么挡的话，技能没恢复、本机的项目与 WebDAV 配置却已被备份里的覆盖了。
@@ -731,11 +773,16 @@ async function restoreApply({ name, agentIds, adoptMachine = false }) {
       skippedAgents: 0,
       skippedInvalid: 0,
       skippedExternal: [],
+      externalDirs: [],
       relocated: [],
     };
   }
   // 不传 agentIds 视为全选，兼容不带勾选的旧调用
   const selected = Array.isArray(agentIds) ? new Set(agentIds) : null;
+  // 认领会立刻落盘改身份，而恢复后续任何一步都可能失败 —— 失败时要把身份还回去，
+  // 否则用户看到「恢复失败」，本机标识却已经成了别人的（下次备份会写进对方的档案）
+  const machineIdBefore = getConfig().machineId;
+  let claimedId = false;
 
   const tmpRoot = path.join(tempDir(), 'cc-skill-restore-' + Date.now());
   const zipPath = tmpRoot + '.zip';
@@ -759,16 +806,22 @@ async function restoreApply({ name, agentIds, adoptMachine = false }) {
       return { ok: false, error: M('manifest 校验失败，不是 CC Skill 的备份', 'Manifest validation failed — not a CC Skill backup') };
     }
 
-    // 认领：用户确认「这份备份就是我（比如刚重装过系统）」，于是把本机标识改成备份里那个。
-    // 必须在算 sameMachine / localDirs 之前完成——项目列表与「本机在用的绝对路径目录」
-    // 都靠它才能一起还原。此刻还没往磁盘上写任何东西，校验不过可以直接退出。
-    if (adoptMachine) {
-      const adopted = adoptMachineId(manifest.machineId);
-      if (!adopted.ok) return adopted;
+    // manifest 的结构先校验，再动任何东西 —— 认领会立刻落盘改身份，后面任何一步失败都会让
+    // 用户看到「恢复失败」而标识已经被改掉（config.backup.json 也被覆盖了）。
+    if (!Array.isArray(manifest.targets) || !Array.isArray(manifest.entries)) {
+      return { ok: false, error: M('manifest 结构不合法，不是有效的备份', 'Malformed manifest — not a valid backup') };
     }
 
-    // 备份里的 config.json 一次读出来，两处要用：算 localDirs（本机自己的备份声明的目录
-    // 也算本机的）与最后合并设置。缺失或损坏时按空对象处理，不该拖累 SKILL 恢复。
+    // 认领：用户确认「这份备份就是我（比如刚重装过系统）」，于是把本机标识改成备份里那个。
+    // 必须在算 sameMachine 之前完成。旧版备份没有这一项 → 认领无从谈起，按「不认领」继续，
+    // 不该因为用户勾了一下就把整次恢复拒掉。
+    if (adoptMachine && manifest.machineId) {
+      const adopted = adoptMachineId(manifest.machineId);
+      if (!adopted.ok) return adopted;
+      claimedId = adopted.changed;
+    }
+
+    // 备份里的 config.json（旧版备份可能不带；解析不动就按空对象处理，不拖累 SKILL 恢复）
     let backupConfig = {};
     try {
       const parsed = JSON.parse(fs.readFileSync(path.join(tmpRoot, 'config.json'), 'utf8'));
@@ -782,14 +835,20 @@ async function restoreApply({ name, agentIds, adoptMachine = false }) {
     let skippedProjects = 0;
     let skippedAgents = 0;
     let skippedInvalid = 0;
-    const skippedExternal = new Map(); // 无法解析的旧绝对路径 -> 受影响的 SKILL 数
+    const externalDirs = new Map(); // 本机配置之外的绝对路径目录 -> SKILL 数（要用户点头才写）
     const relocated = new Map(); // 旧绝对路径 -> 还原后的 ~ 路径
     const dests = new Set();
     const legacyRemap = makeLegacyRemap(manifest);
     // 项目列表只在「同一台机器」的备份上还原：项目路径是机器相关的，换台电脑恢复过来的一串路径
     // 基本全是错的，还得用户手工清一遍。机器身份取自 manifest（旧版备份没有这一项 → 不还原）。
     const sameMachine = !!manifest.machineId && manifest.machineId === getConfig().machineId;
-    const localDirs = localSkillDirs(sameMachine && Array.isArray(backupConfig.agents) ? backupConfig.agents : null);
+    // 允许写入的目录只有两个来源：
+    //   1. 本机配置里现在就在用的 Agent 目录
+    //   2. 用户在确认框里明确点过头的「本机配置之外的目录」（allowExternalDirs）
+    // 绝不采信备份包自己声明的目录：destDir 与包内 agents[].dirs 同出一包，让它们互相印证
+    // 等于让被恢复的那份文件自己给自己发通行证 —— 伪造 machineId + 一对自洽的目录，就能把
+    // 文件写进任意绝对路径（已用 PoC 复现）。所以 gate 只能是「本机配置」或「用户」。
+    const knownDirs = localSkillDirs();
     for (const e of manifest.entries) {
       const t = targetById.get(e.target);
       if (!t) continue;
@@ -809,27 +868,31 @@ async function restoreApply({ name, agentIds, adoptMachine = false }) {
       }
       const src = path.join(tmpRoot, 'data', t.id, e.folder);
       if (!fs.existsSync(src)) continue;
-      // 落到哪儿，三条路：
-      //   1. ~ 形式（现在的备份都这样）——直接用，按本机 home 展开
-      //   2. 绝对路径，且确实是「本机自己的目录」——自定义的 Agent 目录常在 home 之外，备份
-      //      存不下 ~ 形式，只能存绝对路径；同机恢复时这条路径本来就对，照原样写回
-      //   3. 其余绝对路径（旧版备份、换机后的残留）——按 manifest 里声明的 ~ 目录重新映射
-      // 三条都走不通就跳过——照着备份包里的绝对路径硬写，只会得到一棵没人读的幽灵目录树。
-      //
-      // 第 2 条要同时满足两个条件，缺一不可：
-      //   - 是本机的备份（machineId 对得上）。换机恢复时那些绝对路径指的是原机器的位置，
-      //     在本机照着建就是幽灵目录树
-      //   - 该目录现在仍在配置里。恢复会把备份里的 Agent 目录并进本机配置，所以「配置里有」
-      //     单独并不足以说明是本机的——上一轮换机恢复并进来的外来绝对路径，配置里也有
-      let declared = null;
-      if (isTilde(t.destDir)) declared = t.destDir;
-      else if (sameMachine && localDirs.has(normPath(t.destDir))) declared = t.destDir;
-      else declared = legacyRemap(t.destDir);
-      if (!declared) {
-        skippedExternal.set(t.destDir, (skippedExternal.get(t.destDir) || 0) + 1);
+      // 落到哪儿：
+      //   1. ~ 形式（现在的备份都这样）——按本机 home 展开
+      //   2. 本机配置里在用的绝对路径目录——本来就在那儿（自定义 Agent 目录常在 home 之外，
+      //      备份存不下 ~ 形式，只能用绝对路径），直接用
+      //   3. 本机配置之外的绝对路径——只有用户这次确认过（allowExternalDirs）才写，
+      //      否则收集起来交给界面去问
+      //   4. 旧版备份的绝对路径——按 manifest 里声明的 ~ 目录重新映射
+      // 声明里带 .. 或不是绝对路径的一律当非法数据丢掉：expand('~/../..') 会落到 home 之外，
+      // 相对路径更会落到进程当前目录 —— 而备份包是外来输入，没有理由需要这样的目标目录。
+      const raw = String(t.destDir || '');
+      if (hasDotDot(raw) || (!isTilde(raw) && !path.isAbsolute(raw))) {
+        skippedInvalid++;
         continue;
       }
-      if (!isTilde(t.destDir) && declared !== t.destDir) relocated.set(t.destDir, declared);
+      let declared = null;
+      if (isTilde(raw)) declared = raw;
+      else if (knownDirs.has(normPath(raw))) declared = raw;
+      else if (allowExternalDirs) declared = raw;
+      else declared = legacyRemap(raw);
+      if (!declared) {
+        // 映射不上：不是「无法解析」，而是「本机配置里没有这个目录」——交给用户判断
+        externalDirs.set(raw, (externalDirs.get(raw) || 0) + 1);
+        continue;
+      }
+      if (!isTilde(raw) && declared !== raw) relocated.set(raw, declared);
       const destDir = expand(declared);
       const dest = path.join(destDir, e.folder);
       fs.mkdirSync(destDir, { recursive: true });
@@ -847,8 +910,11 @@ async function restoreApply({ name, agentIds, adoptMachine = false }) {
       try {
         const config = getConfig();
         const c = backupConfig;
-        // Agent 目录按勾选合并（取并集），不整体替换——本机自定义过的目录不该被静默抹掉
-        if (Array.isArray(c.agents)) config.agents = mergeAgentDirs(config.agents, c.agents, agentIds);
+        // Agent 目录按勾选合并（取并集），不整体替换——本机自定义过的目录不该被静默抹掉。
+        // 但**只并「本机用得上」的目录**：~ 形式在哪儿都有意义；绝对路径必须是本机已有的、
+        // 或这次真的写进去了的（用户已确认）。否则一份外来备份就能把任意绝对路径塞进本机配置，
+        // 而配置里的目录在下次恢复时会被当成「本机的」—— 正好绕过刚加的那道确认。
+        if (Array.isArray(c.agents)) config.agents = mergeAgentDirs(config.agents, keepUsableDirs(c.agents, knownDirs, dests), agentIds);
         if (Array.isArray(c.projects)) {
           if (sameMachine) config.projects = c.projects.filter((p) => p && p.id && p.dir);
           else projectConfigSkipped = c.projects.filter((p) => p && p.id && p.dir).length;
@@ -856,11 +922,10 @@ async function restoreApply({ name, agentIds, adoptMachine = false }) {
         // 合并而非替换：旧备份的 config.json 里只有 lang，别把本地新加的界面偏好清掉
         if (c.ui) config.ui = normalizeUi({ ...config.ui, ...c.ui });
         if (c.webdav) config.webdav = { ...(config.webdav || {}), ...c.webdav, lastBackupAt: Date.now(), lastBackupHash: '' };
-        // 机器名与别名只跟「本机自己的备份」走：恢复别人的备份不该把本机改名。
-        // 认领之后 sameMachine 为真，这条自然生效。名字已起过就不覆盖（非破坏性）
-        if (sameMachine) {
-          if (!normalizeMachineName(config.machineName)) config.machineName = normalizeMachineName(c.machineName);
-          config.machineNames = { ...normalizeMachineNames(c.machineNames), ...normalizeMachineNames(config.machineNames) };
+        // 机器名只跟「本机自己的备份」走：恢复别人的备份不该把本机改名。名字取自 manifest 顶层
+        // （包内 config.json 里没有它），本机已经起过名就不覆盖 —— 非破坏性
+        if (sameMachine && !normalizeMachineName(config.machineName)) {
+          config.machineName = normalizeMachineName(manifest.machineName);
         }
         normalizeConfigInPlace();
         saveConfig();
@@ -875,15 +940,24 @@ async function restoreApply({ name, agentIds, adoptMachine = false }) {
       restored,
       dests: [...dests],
       appliedConfig,
-      adoptedMachine: !!adoptMachine && sameMachine,
+      adoptedMachine: claimedId,
       projectConfigSkipped,
       sameMachine,
       skippedProjects,
       skippedAgents,
       skippedInvalid,
-      skippedExternal: [...skippedExternal].map(([dir, count]) => ({ dir, count })),
       relocated: [...relocated].map(([from, to]) => ({ from, to })),
+      // 本机配置之外、这次没写的目录：界面拿它去问用户（列具体路径），确认后带
+      // allowExternalDirs 再来一次。绝不默认写 —— 这些路径来自被恢复的那份包
+      externalDirs: [...externalDirs].map(([dir, count]) => ({ dir, count })),
     };
+  } catch (err) {
+    // 认领是立刻落盘的：恢复中途失败就把身份还回去，免得用户看到「失败」而标识已成了别人的
+    if (claimedId) {
+      getConfig().machineId = machineIdBefore;
+      saveConfig();
+    }
+    throw err;
   } finally {
     fs.rmSync(tmpRoot, { recursive: true, force: true });
     fs.rmSync(zipPath, { force: true });

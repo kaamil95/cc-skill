@@ -8,7 +8,7 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const { startApp } = require('../helpers/harness');
-const { writeSkill, makeConfig, makeWebdavConfig, tmpDir, captureHomeEnv, setHome, restoreHomeEnv } = require('../helpers/fixtures');
+const { writeSkill, makeConfig, makeWebdavConfig, tmpDir, zipDir, captureHomeEnv, setHome, restoreHomeEnv } = require('../helpers/fixtures');
 const { WebdavStub } = require('../helpers/webdav-stub');
 
 let app;
@@ -180,14 +180,14 @@ test('HOME 之外的 Agent 目录：同机恢复照样还原', async () => {
   const r = await app.invoke('sync:restoreApply', { name: info.name });
   assert.equal(r.ok, true, JSON.stringify(r));
   assert.equal(r.restored, 3, 'HOME 之外的也要算上');
-  assert.deepEqual(r.skippedExternal, [], '本机在用的目录不该被当成无法映射的路径');
+  assert.deepEqual(r.externalDirs, [], '本机配置里在用的目录不该被当成「配置之外」');
   assert.ok(fs.existsSync(path.join(outsideDir, 'outside', 'SKILL.md')), 'HOME 之外的目录也要还原');
   assert.ok(fs.existsSync(path.join(agentDir, 'alpha', 'SKILL.md')), 'HOME 之下的照旧');
 });
 
 test('不是本机自己的备份：绝对路径目录与项目配置一律跳过，不造幽灵目录', async () => {
-  // 上面那条规则的另一面：备份里的绝对路径只有「本机自己的」才认。换台机器的备份里，
-  // 那些路径指的是原机器的位置 —— 照着建只会得到一棵没人读的目录树，
+  // 上面那条规则的另一面：备份里的绝对路径只有「本机配置里在用的」才直接写。
+  // 换台机器的备份里，那些路径指的是原机器的位置 —— 照着建只会得到一棵没人读的目录树，
   // 正是当初「换台电脑恢复出一堆幽灵目录」那个缺陷。
   const projDir = tmpDir('cc-skill-proj-');
   extraDirs.push(projDir);
@@ -196,8 +196,9 @@ test('不是本机自己的备份：绝对路径目录与项目配置一律跳�
   assert.equal(up.ok, true, JSON.stringify(up));
   const info = await app.invoke('sync:restoreInfo');
 
-  // 冒充「另一台机器」：换掉本机标识，再恢复同一份备份
+  // 冒充「另一台机器」：换掉本机标识，并且本机配置里没有 outsideDir 这个目录了
   await app.invoke('sync:resetMachine');
+  await app.invoke('config:set', { agents: [{ id: 'claude-code', name: 'Claude Code', dirs: [agentDir] }] });
   fs.rmSync(outsideDir, { recursive: true, force: true });
 
   const r = await app.invoke('sync:restoreApply', { name: info.name });
@@ -205,13 +206,112 @@ test('不是本机自己的备份：绝对路径目录与项目配置一律跳�
   assert.equal(r.sameMachine, false);
   assert.equal(r.projectConfigSkipped, 1, '不同机器的项目路径不通用');
   assert.deepEqual(
-    r.skippedExternal.map((x) => x.dir),
+    r.externalDirs.map((x) => x.dir),
     [outsideDir],
-    '别的机器的绝对路径应被报成无法映射'
+    '本机配置之外的目录不该被直接写入，而要交给用户判断'
   );
   assert.ok(!fs.existsSync(path.join(outsideDir, 'outside', 'SKILL.md')), '不该照着备份包重建目录');
   assert.ok(fs.existsSync(path.join(agentDir, 'alpha', 'SKILL.md')), '~ 形式照旧还原');
+
+  // 用户明确点头之后才写：这是那条「由用户断言，而不是由包自证」的边界
+  const forced = await app.invoke('sync:restoreApply', { name: info.name, allowExternalDirs: true });
+  assert.equal(forced.ok, true, JSON.stringify(forced));
+  assert.deepEqual(forced.externalDirs, [], '写过了就不该再报');
+  assert.ok(fs.existsSync(path.join(outsideDir, 'outside', 'SKILL.md')), '确认之后要真的写进去');
   await app.invoke('config:set', { projects: [] });
+});
+
+test('伪造 machineId 的备份包：不确认就地写不进任何绝对路径', async () => {
+  // 回归防线。machineId 不是凭证 —— 它就写在云端侧车文件名、以及每份备份包的 manifest 里，
+  // 谁都能抄。曾经的做法是「包里的 destDir 与包里的 agents[].dirs 互相印证」，那等于让被恢复的
+  // 文件自己给自己发通行证：两边都填同一个任意路径即可，用户点一次「确认恢复」就写进去了。
+  //
+  // 用例自带一个云端备份名，不覆盖别的用例用到的包 —— 覆盖会顺带改掉后面用例恢复到的内容
+  const zipName = 'cc-skill-backup-20260201-010101.zip';
+
+  // 伪造的包：冒充本机（真实 machineId）、把目标指向任意绝对路径
+  const payload = path.join(tmpDir('cc-skill-forge-'), 'payload');
+  const spoofDir = tmpDir('cc-skill-spoof-');
+  fs.writeFileSync(path.join(spoofDir, 'user-file.txt'), '本机原有的文件', 'utf8');
+  fs.mkdirSync(path.join(payload, 'data', 't0', 'pwn'), { recursive: true });
+  fs.writeFileSync(path.join(payload, 'data', 't0', 'pwn', 'SKILL.md'), '---\nname: pwn\ndescription: x\n---\n\n正文\n', 'utf8');
+  fs.writeFileSync(
+    path.join(payload, 'manifest.json'),
+    JSON.stringify({
+      app: 'CC Skill',
+      manifestVersion: 1,
+      created: new Date().toISOString(),
+      hostname: 'evil',
+      machineId: app.readConfig().machineId, // ← 抄来的标识，冒充「本机自己的备份」
+      settings: { agents: [{ id: 'claude-code', name: 'Claude Code', dirs: ['~/.claude/skills'] }] },
+      targets: [{ id: 't0', destDir: spoofDir, kind: 'global', projectId: null, agentIds: ['claude-code'], count: 1 }],
+      entries: [{ target: 't0', folder: 'pwn' }],
+    }),
+    'utf8'
+  );
+  fs.writeFileSync(
+    path.join(payload, 'config.json'),
+    JSON.stringify({ agents: [{ id: 'claude-code', name: 'Claude Code', dirs: [spoofDir] }], projects: [], ui: {} }),
+    'utf8'
+  );
+  stub.files.set('/dav/' + zipName, fs.readFileSync(zipDir(payload, path.join(path.dirname(payload), 'forged.zip'))));
+
+  const r = await app.invoke('sync:restoreApply', { name: zipName });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(r.sameMachine, true, '（前提）伪造的标识确实让 sameMachine 为真 —— 所以它不能当门用');
+  assert.deepEqual(
+    r.externalDirs.map((x) => x.dir),
+    [spoofDir],
+    '不在本机配置里的绝对路径必须留给用户判断'
+  );
+  assert.ok(!fs.existsSync(path.join(spoofDir, 'pwn', 'SKILL.md')), '没确认就不该写进去');
+  assert.ok(fs.existsSync(path.join(spoofDir, 'user-file.txt')), '更不该删掉那个目录里原有文件');
+
+  // 而本机自己的备份落在「~ 目录」里的那部分照旧要恢复
+  assert.ok(fs.existsSync(path.join(agentDir, 'alpha', 'SKILL.md')));
+
+  // 用户没确认时，第二次不带 allowExternalDirs 也还是写不进去
+  // （第一次恢复会把包里的 Agent 目录并进本机配置，所以这一条同时守住「别把外来绝对路径
+  //   并进配置」—— 并进去了，第二次就会被当成「本机的目录」直接写）
+  const again = await app.invoke('sync:restoreApply', { name: zipName });
+  assert.equal(again.ok, true);
+  assert.ok(!fs.existsSync(path.join(spoofDir, 'pwn', 'SKILL.md')), '重复恢复也不能绕过去');
+  assert.ok(!(app.readConfig().agents[0].dirs || []).some((d) => d.includes(path.basename(spoofDir))), '外来绝对路径不该被并进本机配置');
+  stub.remove('/dav/' + zipName);
+  fs.rmSync(spoofDir, { recursive: true, force: true });
+});
+
+test('声明里带 .. 或不是绝对路径的目标一律当非法数据丢掉', async () => {
+  // expand('~/../..') 会落到 home 之外 —— 备份包是外来输入，没有理由需要这种目标目录。
+  // 同样自带一个云端备份名，不动别的用例用到的包
+  const zipName = 'cc-skill-backup-20260203-030303.zip';
+  const escaped = path.join(tmpDir('cc-skill-escape-'), 'target');
+  const payload = path.join(tmpDir('cc-skill-dots-'), 'payload');
+  fs.mkdirSync(path.join(payload, 'data', 't0', 'dots'), { recursive: true });
+  fs.writeFileSync(path.join(payload, 'data', 't0', 'dots', 'SKILL.md'), '---\nname: dots\ndescription: x\n---\n\n正文\n', 'utf8');
+  const makeManifest = (destDir) => ({
+    app: 'CC Skill',
+    manifestVersion: 1,
+    created: new Date().toISOString(),
+    hostname: 'evil',
+    machineId: app.readConfig().machineId,
+    settings: { agents: [] },
+    targets: [{ id: 't0', destDir, kind: 'global', projectId: null, agentIds: ['claude-code'], count: 1 }],
+    entries: [{ target: 't0', folder: 'dots' }],
+  });
+  fs.writeFileSync(path.join(payload, 'config.json'), JSON.stringify({ agents: [], projects: [], ui: {} }), 'utf8');
+
+  for (const destDir of ['~/../' + path.basename(escaped), 'relative/dir']) {
+    fs.writeFileSync(path.join(payload, 'manifest.json'), JSON.stringify(makeManifest(destDir)), 'utf8');
+    stub.files.set('/dav/' + zipName, fs.readFileSync(zipDir(payload, path.join(path.dirname(payload), 'dots.zip'))));
+    const r = await app.invoke('sync:restoreApply', { name: zipName, allowExternalDirs: true });
+    assert.equal(r.ok, true, JSON.stringify(r));
+    assert.equal(r.restored, 0, `${destDir} 不该被写入`);
+    assert.equal(r.skippedInvalid, 1, `${destDir} 应被记成非法条目`);
+  }
+  assert.ok(!fs.existsSync(path.join(escaped, 'dots')), '不该在 home 之外造出目录');
+  stub.remove('/dav/' + zipName);
+  fs.rmSync(escaped, { recursive: true, force: true });
 });
 
 test('重装系统后认领：项目配置与 HOME 之外的目录一次全回来', async () => {
@@ -237,19 +337,99 @@ test('重装系统后认领：项目配置与 HOME 之外的目录一次全回�
   assert.equal(info.sameMachine, false, '换了标识，这份备份就不再算本机的');
   assert.equal(info.machineId, machineA, '弹窗要拿到备份来自哪台机器，才能提示认领');
 
+  // 第一遍：认领 + 把本机认识的部分恢复回来。HOME 之外的目录来自备份包、本机配置里没有，
+  // 所以要交给用户点头（这一步就是「由用户断言，而不是由包自证」的落点）
   const adopted = await app.invoke('sync:restoreApply', { name: info.name, adoptMachine: true });
   assert.equal(adopted.ok, true, JSON.stringify(adopted));
   assert.equal(adopted.adoptedMachine, true);
   assert.equal(adopted.sameMachine, true);
   assert.equal(app.readConfig().machineId, machineA, '认领就是认下这个标识');
   assert.equal(adopted.projectConfigSkipped, 0, '认领之后项目配置要还原');
-  assert.deepEqual(adopted.skippedExternal, [], '认领之后 HOME 之外的目录也要还原');
-  assert.ok(fs.existsSync(path.join(outsideDir, 'outside', 'SKILL.md')), '目录真的落回来了');
+  assert.deepEqual(
+    adopted.externalDirs.map((x) => x.dir),
+    [outsideDir],
+    '本机配置之外的目录要单独交给用户确认'
+  );
+  assert.ok(!fs.existsSync(path.join(outsideDir, 'outside', 'SKILL.md')), '确认之前不写');
   assert.deepEqual(
     app.readConfig().projects.map((p) => p.id),
     ['p1']
   );
+
+  // 第二遍：用户确认那些目录属于本机
+  const forced = await app.invoke('sync:restoreApply', { name: info.name, allowExternalDirs: true });
+  assert.equal(forced.ok, true, JSON.stringify(forced));
+  assert.deepEqual(forced.externalDirs, []);
+  assert.ok(fs.existsSync(path.join(outsideDir, 'outside', 'SKILL.md')), '确认之后目录真的落回来了');
   await app.invoke('config:set', { projects: [] });
+});
+
+test('认领之后恢复失败：本机标识要还回去', async () => {
+  // 认领是立刻落盘的（否则后面算 sameMachine 用的就不是新身份）。所以失败路径必须回滚：
+  // 用户看到「恢复失败」而标识已经成了别人的，下一次备份就会写进对方的档案。
+  const machineA = app.readConfig().machineId;
+  await app.invoke('sync:resetMachine');
+  const machineB = app.readConfig().machineId;
+  assert.notEqual(machineA, machineB);
+
+  // 一个结构上合法、落地时必定抛错的包：destDir 的父级是一条文件，mkdir 会 ENOTDIR
+  const blocked = path.join(root, 'blocked');
+  fs.writeFileSync(blocked, '这里是一条文件，不是目录', 'utf8');
+  const payload = path.join(tmpDir('cc-skill-rollback-'), 'payload');
+  fs.mkdirSync(path.join(payload, 'data', 't0', 'boom'), { recursive: true });
+  fs.writeFileSync(path.join(payload, 'data', 't0', 'boom', 'SKILL.md'), '---\nname: boom\ndescription: x\n---\n\n正文\n', 'utf8');
+  fs.writeFileSync(
+    path.join(payload, 'manifest.json'),
+    JSON.stringify({
+      app: 'CC Skill',
+      manifestVersion: 1,
+      created: new Date().toISOString(),
+      hostname: 'x',
+      machineId: machineA, // 认领它
+      settings: { agents: [] },
+      targets: [{ id: 't0', destDir: '~/blocked/sub', kind: 'global', projectId: null, agentIds: ['claude-code'], count: 1 }],
+      entries: [{ target: 't0', folder: 'boom' }],
+    }),
+    'utf8'
+  );
+  const zipName = 'cc-skill-backup-20260202-020202.zip';
+  stub.files.set('/dav/' + zipName, fs.readFileSync(zipDir(payload, path.join(path.dirname(payload), 'boom.zip'))));
+
+  const r = await app.invoke('sync:restoreApply', { name: zipName, adoptMachine: true });
+  assert.equal(r.ok, false, '写不进去就该报失败');
+  assert.equal(app.readConfig().machineId, machineB, '认领要回滚，别让用户看到「失败」而身份已是别人的');
+
+  fs.rmSync(blocked, { force: true });
+  stub.remove('/dav/' + zipName);
+});
+
+test('旧版备份（认领时包里没有 machineId）不该把整次恢复拒掉', async () => {
+  const zipName = 'cc-skill-backup-20260204-040404.zip';
+  const payload = path.join(tmpDir('cc-skill-noid-'), 'payload');
+  fs.mkdirSync(path.join(payload, 'data', 't0', 'noid'), { recursive: true });
+  fs.writeFileSync(path.join(payload, 'data', 't0', 'noid', 'SKILL.md'), '---\nname: noid\ndescription: x\n---\n\n正文\n', 'utf8');
+  fs.writeFileSync(
+    path.join(payload, 'manifest.json'),
+    JSON.stringify({
+      app: 'CC Skill',
+      manifestVersion: 1,
+      created: new Date().toISOString(),
+      hostname: 'old',
+      // 刻意不写 machineId：旧版备份就是这样
+      settings: { agents: [{ id: 'claude-code', name: 'Claude Code', dirs: ['~/.claude/skills'] }] },
+      targets: [{ id: 't0', destDir: '~/.claude/skills', kind: 'global', projectId: null, agentIds: ['claude-code'], count: 1 }],
+      entries: [{ target: 't0', folder: 'noid' }],
+    }),
+    'utf8'
+  );
+  stub.files.set('/dav/' + zipName, fs.readFileSync(zipDir(payload, path.join(path.dirname(payload), 'noid.zip'))));
+
+  const r = await app.invoke('sync:restoreApply', { name: zipName, adoptMachine: true });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(r.restored, 1, '认领无从谈起，但 SKILL 该照常恢复');
+  assert.equal(r.adoptedMachine, false);
+  assert.ok(fs.existsSync(path.join(agentDir, 'noid', 'SKILL.md')));
+  stub.remove('/dav/' + zipName);
 });
 
 test('备份包损坏时失败且不落地任何文件、不残留临时目录', async () => {
@@ -340,7 +520,17 @@ test('机器改名：本机改自己的名字，别的机器记成本机别名',
   assert.equal(stub.readJson('/dav/host-foreign.json').machineName, '旧笔记本', '改名不写回云端侧车（那台机器下次备份会覆盖掉）');
 
   assert.equal((await app.invoke('sync:renameMachine', { machineId: '../evil', name: 'x' })).ok, false);
-  assert.equal((await app.invoke('sync:renameMachine', { machineId: 'foreign-machine', name: '   ' })).ok, false);
+
+  // 空名字 = 清掉：本机回落到 hostname，别名直接删 —— 弹窗上就是这么承诺的，
+  // 不然机器一旦改过名就再也回不到 hostname
+  assert.equal((await app.invoke('sync:renameMachine', { machineId: 'foreign-machine', name: '   ' })).ok, true);
+  assert.deepEqual(app.readConfig().machineNames, {}, '空名字要把别名删掉');
+  assert.equal((await app.invoke('sync:renameMachine', { machineId: self, name: '' })).ok, true);
+  assert.equal(app.readConfig().machineName, '');
+  const back = await app.invoke('sync:machines');
+  assert.equal(back.machines.find((m) => m.self).name, os.hostname(), '清空后回落 hostname');
+  // 收尾：留一个名字，别影响后续用例对「本机名」的断言
+  await app.invoke('sync:renameMachine', { machineId: self, name: '我的 台式机' });
 });
 
 test('机器档案：移出只删档案，删除则连它最近那份备份一起删', async () => {
@@ -360,7 +550,8 @@ test('机器档案：移出只删档案，删除则连它最近那份备份一�
   assert.ok(!stub.files.has('/dav/host-foreign.json'));
 
   // 本机自己的档案不给删：下一次备份会立刻写回来，要换身份该走认领或重置。
-  // 注意别用 hostMetaPath()——前面几次换标识会在云端留下旧档案，那台机器已经不是「本机」了
+  // 先备份一次，保证「本机档案」确实在云端 —— 前面的用例改过标识，别依赖累积下来的历史
+  assert.equal((await app.invoke('sync:backup')).ok, true);
   const selfFile = 'host-' + app.readConfig().machineId + '.json';
   assert.ok(stub.files.has('/dav/' + selfFile), '本机档案确实在云端');
   const self = await app.invoke('sync:forgetMachine', { file: selfFile });

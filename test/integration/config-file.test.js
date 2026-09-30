@@ -85,6 +85,7 @@ test('导入第一步：只读文件给摘要，本机配置一动不动', async
     projects: 1,
     lang: 'zh',
     webdav: true,
+    webdavUrl: 'https://other.test/dav',
     password: true,
     machineName: '别的机器',
     exportedAt: '2026-01-01T00:00:00.000Z',
@@ -122,6 +123,58 @@ test('导入第二步：勾上 WebDAV 就连设置一起导入', async () => {
   assert.equal(r.webdavApplied, true);
   assert.equal(app.readConfig().webdav.url, 'https://other.test/dav');
   assert.equal(app.readConfig().webdav.password, 'p2');
+});
+
+test('导入：文件换了服务器又没带密码时，清空本机密码（免得把它发到别人的地址）', async () => {
+  // 文件里可能有任意地址 —— 把本机密码留在配置里，下一次备份就会以 Basic 头发到那个地址去
+  await app.invoke('sync:setConfig', { webdav: { url: 'https://mine.test/dav', username: 'me', password: 'MY-SECRET', remotePath: 'cc' } });
+  const payload = {
+    kind: 'config',
+    config: {
+      agents: [{ id: 'a', dirs: [] }],
+      projects: [],
+      webdav: { url: 'https://someone-else.test/dav', username: 'attacker', remotePath: 'cc' },
+    },
+  };
+  const r = await app.invoke('config:importApply', { payload, includeWebdav: true });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(r.passwordCleared, true, '要把「密码被清空了」这件事告诉界面');
+  assert.equal(app.readConfig().webdav.url, 'https://someone-else.test/dav');
+  assert.equal(app.readConfig().webdav.password, '', '本机密码不能跟着新地址走');
+
+  // 地址没变、只是没带密码 → 本机密码该留着（不是所有导入都换服务器）
+  await app.invoke('sync:setConfig', { webdav: { url: 'https://mine.test/dav', username: 'me', password: 'MY-SECRET', remotePath: 'cc' } });
+  const same = await app.invoke('config:importApply', {
+    payload: {
+      kind: 'config',
+      config: { agents: [{ id: 'a', dirs: [] }], projects: [], webdav: { url: 'https://mine.test/dav', username: 'me', remotePath: 'cc' } },
+    },
+    includeWebdav: true,
+  });
+  assert.equal(same.passwordCleared, false);
+  assert.equal(app.readConfig().webdav.password, 'MY-SECRET');
+});
+
+test('导入：外部文件里的脏字段被收敛（dirs 只留字符串、color 必须是 6 位十六进制）', async () => {
+  // dirs 里的非字符串会被 String() 变成字面目录 "[object Object]" 写进配置并被扫描；
+  // color 会被插进 style="background:…"，属性逃逸被 esc 挡住，但 CSS 声明注入是可行的
+  const r = await app.invoke('config:importApply', {
+    payload: {
+      kind: 'config',
+      config: {
+        agents: [
+          { id: 'dirty', name: 'Dirty', dirs: ['~/ok', {}, null, 42], color: 'red;position:fixed' },
+          { id: 'clean', name: 'Clean', dirs: [], color: '#ABCDEF' },
+        ],
+        projects: [],
+      },
+    },
+  });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  const dirty = r.agents.find((a) => a.id === 'dirty');
+  assert.deepEqual(dirty.dirs, ['~/ok'], '非字符串目录要丢掉');
+  assert.equal(dirty.color, undefined, '非法颜色要丢掉，别让它进 style');
+  assert.equal(r.agents.find((a) => a.id === 'clean').color, '#abcdef', '合法颜色统一成小写');
 });
 
 test('导入：回传的 payload 同样要过校验（它经渲染层转了一手）', async () => {

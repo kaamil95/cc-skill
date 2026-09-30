@@ -83,8 +83,10 @@ function ensureMachineId() {
 // （见 webdav 的 adoptMachineId）。
 //
 // 名字分两层：
-//   machineName    本机自己声明的名字，默认回落 hostname；随备份上传，别的机器看到的就是它
-//   machineNames   本机给任意机器起的别名，只影响本机显示，绝不上传
+//   machineName    本机自己声明的名字，默认回落 hostname；写进备份包的 manifest 顶层，
+//                  别的机器读侧车就能看到它
+//   machineNames   本机给任意机器起的别名，只影响本机显示、不写回云端侧车；也不进备份包
+//                  （它对本机以外的人没有意义，见 uploadSnapshot 里的 delete）
 const MACHINE_NAME_MAX = 40;
 const MACHINE_ID_RE = /^[A-Za-z0-9._-]{1,64}$/;
 
@@ -94,7 +96,9 @@ function normalizeMachineName(raw) {
   // 逐字符判而不是写正则 [\x00-\x1f\x7f]：后者会被 eslint 的 no-control-regex 拦下
   // （那条规则是对的，只是这里确实要判控制字符），逐字符判反而更直白
   const cleaned = [...raw].map((ch) => (ch.codePointAt(0) < 32 || ch.codePointAt(0) === 127 ? ' ' : ch)).join('');
-  return cleaned.replace(/\s+/g, ' ').trim().slice(0, MACHINE_NAME_MAX);
+  const collapsed = cleaned.replace(/\s+/g, ' ').trim();
+  // 按码点截断：按 UTF-16 码元 slice 会把末尾的 emoji 切成半个代理对，落进配置就是乱码
+  return [...collapsed].slice(0, MACHINE_NAME_MAX).join('');
 }
 
 /** 机器别名表：id 与名字都得合法，脏条目直接丢掉 */
@@ -117,19 +121,25 @@ function machineDisplayName() {
 /**
  * 给机器改名。
  * - 本机：改 machineName，随备份上传，别的机器看到的就是它
- * - 别的机器：改本机别名 machineNames[id]，只影响本机显示。刻意不写回云端侧车——
- *   那台机器下次备份会用自己的名字覆盖掉，白改
+ * - 别的机器：改本机别名 machineNames[id]，只在本机显示、不写回云端侧车（那台机器下次
+ *   备份会用自己的名字覆盖掉，白改）
+ * 空名字 = 清掉：本机回落到 hostname，别名直接删掉 —— 改名弹窗上就是这么承诺的。
  */
 function renameMachine(machineId, name) {
   const id = String(machineId || '').trim();
   if (!MACHINE_ID_RE.test(id)) return { ok: false, error: M('机器标识不合法', 'Invalid machine id') };
   const clean = normalizeMachineName(name);
-  if (!clean) return { ok: false, error: M('名字不能为空', 'The name cannot be empty') };
   const self = id === config.machineId;
-  if (self) config.machineName = clean;
-  else config.machineNames = { ...normalizeMachineNames(config.machineNames), [id]: clean };
+  if (self) {
+    config.machineName = clean;
+  } else {
+    const names = normalizeMachineNames(config.machineNames);
+    if (clean) names[id] = clean;
+    else delete names[id];
+    config.machineNames = names;
+  }
   saveConfig();
-  return { ok: true, name: clean, self };
+  return { ok: true, name: clean || (self ? machineDisplayName() : ''), self };
 }
 
 // 界面偏好：语言 + 主题 + 强调色 + 弹窗遮罩的毛玻璃强度。越界 / 缺失一律回落到默认值，
@@ -324,6 +334,8 @@ function configSummary(data, c) {
     projects: Array.isArray(c.projects) ? c.projects.filter((p) => p && p.id && p.dir).length : 0,
     lang: (c.ui && c.ui.lang) || 'auto',
     webdav: !!w.url,
+    // 文件里的服务器地址：界面要拿它和本机地址比，好在「换了服务器」时提醒密码会被清掉
+    webdavUrl: typeof w.url === 'string' ? w.url.trim().slice(0, 200) : '',
     password: !!w.password,
     machineName: normalizeMachineName(c.machineName),
     exportedAt: typeof data.exportedAt === 'string' ? data.exportedAt : '',
@@ -336,8 +348,8 @@ function configSummary(data, c) {
  * （确认框里写「用 X 个 Agent / Y 个项目替换本机的 A 个 / B 个」）。
  * 传进来的 payload 同样不可信（它经渲染层转了一手），所以在这里重新校验一遍。
  *
- * 机器名与别名只做非破坏性合并：名字本机还没起过才采用文件里的，别名取并集。
- * 这两样是展示信息，覆盖掉本机已有的只会让人莫名其妙。
+ * 机器名与别名只做非破坏性合并，且**本机优先**：名字本机还没起过才采用文件里的，
+ * 别名取并集但本机已有的不被覆盖。这两样是展示信息，覆盖掉本机已有的只会让人莫名其妙。
  */
 function applyConfigPayload(payload, { includeWebdav = false } = {}) {
   const parsed = parseConfigPayload(payload);
@@ -346,10 +358,22 @@ function applyConfigPayload(payload, { includeWebdav = false } = {}) {
   config.agents = normalizeAgents(c.agents);
   config.projects = (Array.isArray(c.projects) ? c.projects : []).filter((p) => p && p.id && p.dir);
   if (c.ui) config.ui = normalizeUi({ ...config.ui, ...c.ui });
-  // 密码跟不跟着走由用户决定：导出的文件可能被随手放进共享盘或仓库
-  if (includeWebdav && c.webdav) config.webdav = { ...(config.webdav || {}), ...c.webdav };
+  let passwordCleared = false;
+  if (includeWebdav && c.webdav) {
+    const local = config.webdav || {};
+    const next = { ...local, ...c.webdav };
+    // 换到别的服务器（地址或账号变了）时不能把本机密码带过去：文件可能就是别人给的，
+    // 而密码会以 Basic 头发往文件里写的那个地址。文件没带密码就清空，让用户重填。
+    const moved = String(c.webdav.url || '') !== String(local.url || '') || String(c.webdav.username || '') !== String(local.username || '');
+    if (moved && !c.webdav.password && local.password) {
+      next.password = '';
+      passwordCleared = true;
+    }
+    config.webdav = next;
+  }
   if (!normalizeMachineName(config.machineName)) config.machineName = normalizeMachineName(c.machineName);
-  config.machineNames = { ...normalizeMachineNames(config.machineNames), ...normalizeMachineNames(c.machineNames) };
+  // 别名取并集，本机已有的优先（与恢复路径一致：本机的显示信息不该被外来文件改写）
+  config.machineNames = { ...normalizeMachineNames(c.machineNames), ...normalizeMachineNames(config.machineNames) };
   normalizeConfigInPlace();
   saveConfig();
   return {
@@ -358,14 +382,30 @@ function applyConfigPayload(payload, { includeWebdav = false } = {}) {
     projects: config.projects,
     ui: config.ui,
     webdavApplied: !!(includeWebdav && c.webdav),
+    passwordCleared,
   };
 }
 
-/** 只留带 id 的 Agent，并把 dirs 收敛成字符串数组——外部文件里什么都可能有 */
+/**
+ * 只留带 id 的 Agent，并把字段收敛到能安全落进界面/配置的范围。
+ * 外部文件里什么都可能有：dirs 里的非字符串会被 String() 变成字面目录 "[object Object]"
+ * 写进配置并被扫描，color 会被直接插进 style="background:…"（属性逃逸被 esc 挡住，
+ * 但 CSS 声明注入是可行的），所以两者都按形状校验。
+ */
 function normalizeAgents(raw) {
   return (Array.isArray(raw) ? raw : [])
     .filter((a) => a && typeof a.id === 'string' && a.id)
-    .map((a) => ({ ...a, id: a.id, name: String(a.name || a.id), dirs: (Array.isArray(a.dirs) ? a.dirs : []).map(String) }));
+    .map((a) => {
+      const out = {
+        ...a,
+        id: a.id,
+        name: String(a.name || a.id),
+        dirs: (Array.isArray(a.dirs) ? a.dirs : []).filter((d) => typeof d === 'string'),
+      };
+      if (typeof out.color !== 'string' || !ACCENT_RE.test(out.color.trim())) delete out.color;
+      else out.color = out.color.trim().toLowerCase();
+      return out;
+    });
 }
 
 module.exports = {

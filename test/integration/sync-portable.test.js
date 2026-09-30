@@ -179,7 +179,7 @@ const manifestOf = ({ targets, entries, agents = [] }) => ({
   entries,
 });
 
-test('旧版备份里的绝对路径无从映射时：跳过并报出来，绝不照着重建成幽灵目录', async () => {
+test('旧版备份里的绝对路径无从映射时：不落地，交给用户判断', async () => {
   const ghost = path.join(app.workDir, 'ghost-home', '.claude', 'skills');
   const name = putBackup(
     'cc-skill-backup-20200101-000000.zip',
@@ -193,9 +193,16 @@ test('旧版备份里的绝对路径无从映射时：跳过并报出来，绝�
 
   const r = await app.invoke('sync:restoreApply', { name });
   assert.equal(r.ok, true, JSON.stringify(r));
-  assert.equal(r.restored, 0, '无法映射 → 不落地');
-  assert.deepEqual(r.skippedExternal, [{ dir: ghost, count: 1 }], '要把跳过的路径和条数报出来，而不是静默报成功');
+  assert.equal(r.restored, 0, '映射不上就不落地');
+  assert.deepEqual(r.externalDirs, [{ dir: ghost, count: 1 }], '要把这批路径和条数报出来交给用户，而不是静默报成功');
   assert.ok(!fs.existsSync(ghost), '不该照着上传机器的绝对路径重建目录');
+
+  // 用户确认之后才写 —— 这条边界由用户把守，不由备份包自证
+  const forced = await app.invoke('sync:restoreApply', { name, allowExternalDirs: true });
+  assert.equal(forced.ok, true, JSON.stringify(forced));
+  assert.equal(forced.restored, 1, '确认后就该写进去');
+  assert.ok(fs.existsSync(path.join(ghost, 'old-skill', 'SKILL.md')));
+  fs.rmSync(path.join(app.workDir, 'ghost-home'), { recursive: true, force: true });
 });
 
 test('旧版备份的绝对路径能按 manifest 声明的 ~ 目录映射到本机', async () => {

@@ -272,11 +272,34 @@ test('新加的界面文案都有英文对照（英文环境下不会掉出中�
 // OS 级指纹失效，而硬件序列号最容易撞号，认错成「同一台」比认成「不同台」危险得多），
 // 改成由用户在恢复弹窗里明确认领。
 test('恢复弹窗里的认领开关默认收起，拿到对方标识才显示', () => {
-  assert.match(html, /id="rv-adopt-row"[^>]*hidden/, '认领行默认必须是收起的');
+  // 踩过：这一行用 hidden 属性收起，可它自己的 class 声明了 display:grid —— 作者样式压过
+  // UA 的 [hidden]{display:none}，于是它一直可见，而 hidden 属性读回来还是 true，
+  // 用户勾的是一个「看得见却被静默忽略」的框。断言必须盯可见性语义，不能只盯属性在不在。
+  const rowTag = (html.match(/<label[^>]*id="rv-adopt-row"[^>]*>/) || [''])[0];
+  assert.ok(rowTag, '认领行要在 index.html 里');
+  assert.match((rowTag.match(/class="([^"]+)"/) || [])[1] || '', /\bhidden\b/, '认领行默认必须收起（用 .hidden 类）');
+  assert.ok(!/\shidden(\s|>)/.test(rowTag), '不要用 hidden 属性：.adopt-row 有 display 声明，属性收不起来');
   assert.match(appJs, /const canAdopt = !!info\.machineId && !info\.sameMachine/, '只有拿到对方标识、且确认不是本机时才给认领');
-  assert.match(appJs, /const adoptMachine = !\$\('#rv-adopt-row'\)\.hidden/, '收起时一律当成没勾，不看残留的勾选状态');
-  const call = appJs.match(/api\.invoke\('sync:restoreApply', \{[^}]*\}/);
-  assert.ok(call && /adoptMachine/.test(call[0]), '确认时要把勾选状态一起传给 restoreApply');
+  assert.match(appJs, /classList\.toggle\('hidden', !canAdopt\)/, '收起/展开要走 .hidden 类');
+  assert.match(appJs, /const adoptMachine = !\$\('#rv-adopt-row'\)\.classList\.contains\('hidden'\)/, '读勾选状态也要按同一套判据');
+});
+
+test('带 display 声明的元素不能用 hidden 属性收起（.adopt-row 那类坑）', () => {
+  // 通用防线：index.html 里带 hidden 属性、又不带 .hidden 类、而某个 class 声明了 display 的元素，
+  // 都会「永远可见」。同类坑只有过 .adopt-row 一处，这条断言把它钉住，也拦住以后新加的。
+  const displayClasses = new Set();
+  for (const m of css.matchAll(/\.([a-zA-Z][\w-]*)[^{}]*\{([^}]*)\}/g)) {
+    if (/(^|;|\s)display\s*:/.test(m[2])) displayClasses.add(m[1]);
+  }
+  const offenders = [];
+  for (const m of html.matchAll(/<[a-zA-Z][^>]*\bhidden\b[^>]*>/g)) {
+    const tag = m[0];
+    const cls = ((tag.match(/class="([^"]+)"/) || [])[1] || '').split(/\s+/).filter(Boolean);
+    if (cls.includes('hidden')) continue;
+    const hit = cls.filter((c) => displayClasses.has(c));
+    if (hit.length) offenders.push((tag.match(/id="([^"]+)"/) || [])[1] + '（' + hit.join(',') + '）');
+  }
+  assert.deepEqual(offenders, [], '这些元素加了 hidden 属性却收不起来：' + offenders.join('、'));
 });
 
 test('认领与重置走同一个写入点，身份不接受任意字符串', () => {

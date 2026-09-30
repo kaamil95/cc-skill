@@ -242,7 +242,6 @@
     '旧版备份的目录按原机器的用户目录记录，恢复时会自动映射到本机': 'This is an older backup: its directories are recorded against the original machine, and will be mapped onto this machine automatically',
     '未恢复 {n} 个项目 SKILL（随项目仓库走）': '{n} project skills were not restored (they travel with their project repo)',
     '未恢复 {n} 个未勾选 Agent 的 SKILL': '{n} skills belonging to unselected agents were not restored',
-    '未恢复 {n} 个 SKILL：{p} 无法映射到本机目录': '{n} skills were not restored: {p} could not be mapped onto this machine',
     '{n} 个旧版目录已按本机用户目录重新映射': '{n} legacy directories were remapped onto this machine',
     '跳过 {n} 个路径非法的条目': 'Skipped {n} entries with invalid paths',
     '恢复将覆盖本机同名的全局 SKILL': 'Restoring will OVERWRITE global skills with the same name on this machine',
@@ -505,8 +504,6 @@
     '界面偏好会合并保留；本机已起过的机器名不会被覆盖。':
       'Appearance preferences are merged in; a machine name you already set here is kept.',
     '文件里带了 WebDAV 设置与密码，会一并导入。': 'The file carries WebDAV settings and a password — both will be imported.',
-    '文件里带了 WebDAV 设置（不含密码），会一并导入，密码保留本机的。':
-      'The file carries WebDAV settings without a password — they will be imported and your local password kept.',
     '导入': 'Import',
     '正在读取云端档案…': 'Reading cloud profiles…',
     '读取失败': 'Failed to read',
@@ -540,6 +537,24 @@
       'This backup came from "{name}", not from this machine. Tick this if it is this computer (a fresh OS install, say) — project entries and directories outside HOME are then restored too.',
     '保存': 'Save',
     '改名': 'Rename',
+    '来自「{n}」的配置': 'Config from "{n}"',
+    '选中的配置文件': 'The selected config file',
+    '{s}（导出于 {d}）': '{s} (exported {d})',
+    '注意：本机的 WebDAV 地址会被改成 {u}，与本机密码不是一对，所以密码会被清空（需要重新填写）。':
+      'Note: your WebDAV URL becomes {u}, which does not go with your current password — so the password is cleared and must be re-entered.',
+    '文件里的地址': 'the address in the file',
+    '本机的 WebDAV 地址会被改成 {u}（文件里没带密码）。': 'Your WebDAV URL becomes {u} (the file carries no password).',
+    '文件里带了 WebDAV 设置（不含密码），会一并导入，地址不变时密码保留本机的。':
+      'The file carries WebDAV settings without a password — they are imported; your password is kept as long as the address does not change.',
+    '配置已导入 ✓（WebDAV 密码已清空，请重新填写）': 'Config imported ✓ (the WebDAV password was cleared — please re-enter it)',
+    '把这台机器从档案列表里移出，并从云端永久删除它的备份：\n{n}\n这个操作不可撤销。':
+      'Remove this machine from the profile list and permanently delete its backup from the cloud:\n{n}\nThis cannot be undone.',
+    '· 还有 {n} 个目录…': '· …and {n} more directories',
+    '这些目录要写入吗？': 'Write into these directories?',
+    '备份里有 {n} 个 SKILL 位于本机配置之外的目录：\n{p}\n\n它们不在本机配置里，所以刚才没有写入。确认这些目录属于本机（而不是别的电脑的路径）之后才写入。':
+      'The backup has {n} skills in directories this machine does not have configured:\n{p}\n\nThey were not written, because they are not part of this machine’s config. Confirm these directories belong to this machine (and are not another computer’s paths) to write them.',
+    '确认并写入': 'Confirm and write',
+    '正在写入本机配置之外的目录…': 'Writing to directories outside this machine’s config…',
   };
 
   let lang = localStorage.getItem('cc-skill-lang') || 'auto';

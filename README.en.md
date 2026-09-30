@@ -88,7 +88,9 @@ Each machine has a random `machineId` in its `config.json`, and the cloud files 
 
 The identity is deliberately **not** inferred from hardware: a clean reinstall regenerates the OS-level fingerprints anyway (registry `MachineGuid`, volume serial), and the hardware serials that survive it are the ones that collide between identically bought machines — and mistaking two machines for one fails silently, which is far worse than the reverse.
 
-Settings → Machine & config lets you rename machines (your own name travels with the backup; names you give other machines stay local), reset the id, and manage **cloud machine profiles** (rename / claim / remove / delete a profile together with its most recent backup). Configs can also be exported to JSON and imported back.
+Settings → Machine & config lets you rename machines (your own name travels with the backup; names you give other machines stay local), reset the id, and manage **cloud machine profiles** (rename / claim / remove / delete a profile together with the backup it records — deleting is permanent, and the confirmation names the exact file). Configs can also be exported to JSON and imported back.
+
+**The restore range is decided by this machine, not by the archive.** Files are only written into directories your own config uses, or into the extra ones you confirm from a list during the restore; what the archive declares about itself does not count. Paths containing `..`, or that are not absolute, are dropped as malformed.
 
 ## FAQ
 
@@ -96,7 +98,7 @@ Settings → Machine & config lets you rename machines (your own name travels wi
 The UI runs anywhere Electron runs, but linking relies on NTFS junctions. PRs for `symlink` support on unix are welcome.
 
 **Where is my data?**
-Windows portable: config and log both live next to the exe (copy the whole folder and you are done; an old `%APPDATA%` config is migrated on first launch). macOS: `~/Library/Application Support/CC Skill/`. Tests / multiple instances can point `CC_SKILL_DATA_DIR` elsewhere. CC Skill never deletes anything permanently — removals go to the Recycle Bin.
+Windows portable: config and log both live next to the exe (copy the whole folder and you are done; an old `%APPDATA%` config is migrated on first launch). macOS: `~/Library/Application Support/CC Skill/`. Tests / multiple instances can point `CC_SKILL_DATA_DIR` elsewhere. Local files are never deleted permanently — removals go to the Recycle Bin; **cloud backups are** (WebDAV has no recycle bin), which is why deleting one from "Cloud machine profiles" names the exact file in its confirmation.
 
 **Is my WebDAV password safe?**
 It is stored in the local config file in plain text (same as most similar tools). Use an app-specific password and keep the config file private.

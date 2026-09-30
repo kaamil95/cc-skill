@@ -153,6 +153,9 @@ test('机器名去掉控制字符与换行，压掉连续空白，限长 40', ()
   assert.equal(normalizeMachineName('x'.repeat(60)).length, 40);
   // 非 ASCII 一律保留：中文、emoji 都该原样留下
   assert.equal(normalizeMachineName('🖥 开发机'), '🖥 开发机');
+  // 截断必须按码点：按 UTF-16 码元 slice 会把末尾的 emoji 切成半个代理对，写进配置就是乱码
+  assert.equal([...normalizeMachineName('🖥'.repeat(30))].length, 30, '30 个 emoji = 60 码元，不该被截成 40 码元');
+  assert.equal([...normalizeMachineName('🖥'.repeat(50))].length, 40, '超长按码点截到 40');
   // 零宽字符不是控制字符，不该被当空白吃掉
   assert.equal(normalizeMachineName('a​b'), 'a​b');
 });
@@ -194,6 +197,7 @@ test('parseConfigPayload 给出确认框要用的摘要', () => {
     projects: 1,
     lang: 'en',
     webdav: true,
+    webdavUrl: 'https://dav.test',
     password: true,
     machineName: '台式机',
     exportedAt: '2026-09-30T00:00:00.000Z',

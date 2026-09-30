@@ -389,7 +389,7 @@
           <div class="rs-list" id="rv-agents"></div>
           <div class="hint" id="rv-skip" hidden></div>
         </div>
-        <label class="adopt-row" id="rv-adopt-row" hidden>
+        <label class="adopt-row hidden" id="rv-adopt-row">
           <input type="checkbox" id="rv-adopt" />
           <span id="rv-adopt-text"></span>
         </label>
@@ -447,7 +447,8 @@
   </div>
 
   <!-- 通用确认弹窗：替代原生 confirm，风格与「从云端恢复」一致 -->
-  <div class="modal-overlay hidden" id="modal-confirm">    <div class="modal" style="width:470px">
+  <div class="modal-overlay hidden" id="modal-confirm">
+    <div class="modal" style="width:470px">
       <div class="modal-body" style="padding:22px 24px">
         <div class="restore-title"><span class="restore-ico" id="cf-ico">⚠</span><span id="cf-title"></span></div>
         <div class="cf-msg" id="cf-msg"></div>

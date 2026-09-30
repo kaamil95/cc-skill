@@ -207,6 +207,8 @@ const openModal = (id) => $('#' + id).classList.remove('hidden');
 const closeModal = (id) => {
   // 下拉弹层挂在 body 上，不跟着弹窗一起隐藏 —— 弹窗关了要顺手收掉
   closePicker();
+  // 改名弹窗的目标也要一起清掉，免得关掉之后还被回车用陈旧目标改一次
+  if (id === 'modal-rename') state.renameTarget = null;
   $('#' + id).classList.add('hidden');
 };
 
@@ -1624,9 +1626,12 @@ $('#btn-rename-go').addEventListener('click', async () => {
   if (!$('#modal-machines').classList.contains('hidden')) await loadMachines();
 });
 
-// 这个弹窗就是为了敲一个名字，回车即保存（和市场里的几个输入框一致）
+// 这个弹窗就是为了敲一个名字，回车即保存（和市场里的几个输入框一致）。
+// 弹窗关掉之后焦点可能还停在输入框上，所以要挡一道：别拿着旧目标又改一次名
 $('#rn-input').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') $('#btn-rename-go').click();
+  if (e.key !== 'Enter') return;
+  if ($('#modal-rename').classList.contains('hidden')) return;
+  $('#btn-rename-go').click();
 });
 
 $('#btn-mc-rename').addEventListener('click', () => openRenameModal({ machineId: state.machine.id, self: true, name: state.machine.name, alias: '' }));
@@ -1660,7 +1665,10 @@ $('#btn-cfg-import').addEventListener('click', async () => {
   if (!r.ok) return toast(r.error || t('导入失败'), 'err');
   const s = r.summary || {};
   // 先把后果说清楚：Agent 与项目是替换，不是合并
+  const source = s.machineName ? tf('来自「{n}」的配置', { n: s.machineName }) : t('选中的配置文件');
+  const when = s.exportedAt ? new Date(s.exportedAt) : null;
   const lines = [
+    (when && !isNaN(when) ? tf('{s}（导出于 {d}）', { s: source, d: when.toLocaleString() }) : source) + t('：'),
     tf('用文件里的 {n} 个 Agent / {m} 个项目替换本机的 {a} 个 / {b} 个？', {
       n: s.agents,
       m: s.projects,
@@ -1669,8 +1677,20 @@ $('#btn-cfg-import').addEventListener('click', async () => {
     }),
     t('界面偏好会合并保留；本机已起过的机器名不会被覆盖。'),
   ];
-  if (s.webdav)
-    lines.push(s.password ? t('文件里带了 WebDAV 设置与密码，会一并导入。') : t('文件里带了 WebDAV 设置（不含密码），会一并导入，密码保留本机的。'));
+  if (s.webdav) {
+    const mine = String((state.webdav && state.webdav.url) || '');
+    const moved = String(s.webdavUrl || '') !== mine;
+    if (!s.password && moved && state.webdav && state.webdav.password) {
+      // 最该说清的一种：地址换了、密码还在本机 —— 不清掉的话下一次备份就把本机密码发到那个地址去了
+      lines.push(tf('注意：本机的 WebDAV 地址会被改成 {u}，与本机密码不是一对，所以密码会被清空（需要重新填写）。', { u: s.webdavUrl || t('文件里的地址') }));
+    } else if (!s.password && moved) {
+      lines.push(tf('本机的 WebDAV 地址会被改成 {u}（文件里没带密码）。', { u: s.webdavUrl || t('文件里的地址') }));
+    } else if (s.password) {
+      lines.push(t('文件里带了 WebDAV 设置与密码，会一并导入。'));
+    } else {
+      lines.push(t('文件里带了 WebDAV 设置（不含密码），会一并导入，地址不变时密码保留本机的。'));
+    }
+  }
   const ok = await confirmModal({ title: t('从文件导入配置'), message: lines.join('\n'), confirmLabel: t('导入'), danger: false });
   if (!ok) return;
 
@@ -1678,7 +1698,7 @@ $('#btn-cfg-import').addEventListener('click', async () => {
   if (!applied.ok) return toast(applied.error || t('导入失败'), 'err');
   await refreshMachine();
   await scan();
-  toast(t('配置已导入 ✓'), 'ok');
+  toast(applied.passwordCleared ? t('配置已导入 ✓（WebDAV 密码已清空，请重新填写）') : t('配置已导入 ✓'), applied.passwordCleared ? '' : 'ok');
 });
 
 // ------------------------------ 云端机器档案 ----------------------------------
@@ -1713,7 +1733,8 @@ function machineRowHTML(m) {
   } else {
     if (m.machineId) acts.push(btnHTML('adopt', { id: m.machineId }, t('设为我的机器标识')));
     acts.push(btnHTML('forget', { file: m.file }, t('移出列表')));
-    acts.push(btnHTML('purge', { file: m.file }, t('删除档案与备份'), ' danger'));
+    // 把要删的备份文件名带进按钮，确认框里要显示它 —— 「最近那一份」是哪一份得让用户看得见
+    acts.push(btnHTML('purge', { file: m.file, backup: (m.backup && m.backup.name) || '' }, t('删除档案与备份'), ' danger'));
   }
   return `<div class="mc-row${m.self ? ' mc-row-self' : ''}">
     <div class="mc-main">
@@ -1774,9 +1795,13 @@ async function onMachineAction(e) {
     };
     run = () => api.invoke('sync:forgetMachine', { file });
   } else if (act === 'purge') {
+    // 把具体文件名写进确认框：只说「最近那一份」用户没法核对，而这删的是云端唯一的一份
+    const target = btn.dataset.backup;
     ask = {
       title: t('删除档案与备份'),
-      message: t('把这台机器从档案列表里移出，并连它最近那一份备份一起从云端永久删除？\n这个操作不可撤销。'),
+      message: target
+        ? tf('把这台机器从档案列表里移出，并从云端永久删除它的备份：\n{n}\n这个操作不可撤销。', { n: target })
+        : t('把这台机器从档案列表里移出，并连它最近那一份备份一起从云端永久删除？\n这个操作不可撤销。'),
       confirmLabel: t('删除'),
     };
     run = () => api.invoke('sync:forgetMachine', { file, deleteBackups: true });
@@ -1896,9 +1921,13 @@ $('#btn-wd-restore').addEventListener('click', async () => {
 
 // 认领开关：备份来自别的机器时才有可勾的东西（重装系统后就靠它把项目一起认回来）。
 // 旧版备份没有侧车元数据，拿不到对方标识，也就无从认领——那种情况不显示这一行。
+//
+// 切显示必须走 .hidden 类，不能用 hidden 属性：.adopt-row 自己声明了 display:grid，
+// 作者样式压过 UA 样式表的 [hidden]{display:none}，元素会一直可见——而 hidden 属性读回来
+// 还是 true，于是用户勾的是一个「看得见、却被静默忽略」的框。
 function renderAdoptRow(info) {
   const canAdopt = !!info.machineId && !info.sameMachine;
-  $('#rv-adopt-row').hidden = !canAdopt;
+  $('#rv-adopt-row').classList.toggle('hidden', !canAdopt);
   $('#rv-adopt').checked = false;
   if (!canAdopt) return;
   const label = info.machineName || info.hostname || t('另一台电脑');
@@ -1907,12 +1936,43 @@ function renderAdoptRow(info) {
   });
 }
 
+// 备份包里有 SKILL 落在「本机配置之外的目录」时绝不默认写入 —— 那些路径来自被恢复的那份包，
+// 由它自己决定往哪儿写，等于让外来文件自己发通行证。办法是把具体路径摆给用户看，
+// 用户点头（allowExternalDirs）之后再恢复一次。
+async function confirmExternalDirs(prev) {
+  const dirs = prev.externalDirs || [];
+  const n = dirs.reduce((s, x) => s + x.count, 0);
+  const shown = dirs.slice(0, 5).map((x) => `· ${x.dir}（${tf('{n} 个 SKILL', { n: x.count })}）`);
+  if (dirs.length > 5) shown.push(tf('· 还有 {n} 个目录…', { n: dirs.length - 5 }));
+  const ok = await confirmModal({
+    title: t('这些目录要写入吗？'),
+    message: tf(
+      '备份里有 {n} 个 SKILL 位于本机配置之外的目录：\n{p}\n\n它们不在本机配置里，所以刚才没有写入。确认这些目录属于本机（而不是别的电脑的路径）之后才写入。',
+      { n, p: shown.join('\n') }
+    ),
+    confirmLabel: t('确认并写入'),
+  });
+  if (!ok) return;
+  $('#rv-status').textContent = t('正在写入本机配置之外的目录…');
+  const again = await api.invoke('sync:restoreApply', {
+    name: state.restoreName,
+    agentIds: state.restoreAgents,
+    // 认领在上一轮已经落盘，这一轮不必再传（传了也只是空操作）
+    adoptMachine: false,
+    allowExternalDirs: true,
+  });
+  if (!again.ok) return toast(again.error || t('恢复失败'), 'err');
+  toast(tf('已从云端恢复 {n} 个 SKILL ✓', { n: again.restored }), 'ok');
+  if (again.relocated?.length) toast(tf('{n} 个旧版目录已按本机用户目录重新映射', { n: again.relocated.length }), 'ok');
+  await scan();
+}
+
 $('#btn-restore-confirm').addEventListener('click', async () => {
   const btn = $('#btn-restore-confirm');
   btn.disabled = true;
   $('#rv-status').textContent = t('正在下载并恢复…');
   try {
-    const adoptMachine = !$('#rv-adopt-row').hidden && $('#rv-adopt').checked;
+    const adoptMachine = !$('#rv-adopt-row').classList.contains('hidden') && $('#rv-adopt').checked;
     const r = await api.invoke('sync:restoreApply', { name: state.restoreName, agentIds: state.restoreAgents, adoptMachine });
     if (!r.ok) {
       $('#rv-status').textContent = '✗ ' + r.error;
@@ -1936,11 +1996,6 @@ $('#btn-restore-confirm').addEventListener('click', async () => {
       );
     }
     if (r.skippedAgents) toast(tf('未恢复 {n} 个未勾选 Agent 的 SKILL', { n: r.skippedAgents }), '');
-    // 这两种是「本该恢复却没恢复成」，必须报出来——静默跳过正是当初那个缺陷的形态
-    if (r.skippedExternal?.length) {
-      const n = r.skippedExternal.reduce((s, x) => s + x.count, 0);
-      toast(tf('未恢复 {n} 个 SKILL：{p} 无法映射到本机目录', { n, p: r.skippedExternal.map((x) => x.dir).join('、') }), 'err');
-    }
     if (r.skippedInvalid) toast(tf('跳过 {n} 个路径非法的条目', { n: r.skippedInvalid }), 'err');
     if (r.appliedConfig) toast(t('配置也已恢复 ✓'), 'ok');
     closeModal('modal-restore');
@@ -1955,6 +2010,8 @@ $('#btn-restore-confirm').addEventListener('click', async () => {
     $('#main-title').textContent = t('总览');
     await scan();
     i18n.apply(document);
+    // 放在最后：它要再开一个确认弹窗，得等恢复弹窗先收掉，别叠在一起
+    if (r.externalDirs?.length) await confirmExternalDirs(r);
   } finally {
     btn.disabled = false;
   }

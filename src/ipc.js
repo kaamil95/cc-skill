@@ -232,7 +232,9 @@ function registerIpcHandlers({ getWindow, appDir, userData, applyProxy }) {
   handle('sync:test', () => webdav.testConnection());
   handle('sync:backup', () => webdav.backup());
   handle('sync:restoreInfo', () => webdav.restoreInfo());
-  handle('sync:restoreApply', ({ name, agentIds, adoptMachine }) => webdav.restoreApply({ name, agentIds, adoptMachine }));
+  handle('sync:restoreApply', ({ name, agentIds, adoptMachine, allowExternalDirs }) =>
+    webdav.restoreApply({ name, agentIds, adoptMachine, allowExternalDirs })
+  );
 
   // 机器档案：云端各机器的侧车、改名、认领、移出、重置本机标识
   handle('sync:machines', () => webdav.listMachines());
