@@ -8,13 +8,14 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const { startApp } = require('../helpers/harness');
-const { writeSkill, makeConfig, makeWebdavConfig, tmpDir } = require('../helpers/fixtures');
+const { writeSkill, makeConfig, makeWebdavConfig, tmpDir, captureHomeEnv, setHome, restoreHomeEnv } = require('../helpers/fixtures');
 const { WebdavStub } = require('../helpers/webdav-stub');
 
 let app;
 let stub;
 let root;
 let agentDir;
+let savedHomeEnv;
 
 // 应用自己的临时目录已被 harness 隔离到 workDir 下，这里看到的就是它产生的全部临时文件
 const listRestoreTemps = () => fs.readdirSync(app.tempDir).filter((n) => n.startsWith('cc-skill-restore-'));
@@ -24,8 +25,13 @@ function assertNoNewTemps(before) {
 }
 
 before(async () => {
+  // SKILL 目录要真的落在 HOME 之下：备份把目录存成 ~ 形式、恢复再按本机 home 展开，
+  // 这条链路是「换台电脑恢复」的前提，而它只有在 HOME 之下才走得通。
+  // 用开发机的 os.tmpdir() 当 HOME 是靠不住的（见 fixtures.js 的说明）。
+  savedHomeEnv = captureHomeEnv();
   root = tmpDir('cc-skill-sync-');
-  agentDir = path.join(root, 'skills');
+  setHome(root);
+  agentDir = path.join(root, '.claude', 'skills');
   fs.mkdirSync(agentDir, { recursive: true });
   stub = new WebdavStub();
   const url = await stub.start();
@@ -36,6 +42,7 @@ after(() => {
   app.cleanup();
   stub.stop();
   fs.rmSync(root, { recursive: true, force: true });
+  restoreHomeEnv(savedHomeEnv);
 });
 
 test('sync:setConfig 归一化远程路径的各种斜杠写法', async () => {

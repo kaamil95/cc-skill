@@ -6,7 +6,7 @@ const assert = require('node:assert/strict');
 const path = require('path');
 const fs = require('fs');
 const { startApp } = require('../helpers/harness');
-const { writeSkill, makeConfig, makeWebdavConfig, tmpDir, zipDir } = require('../helpers/fixtures');
+const { writeSkill, makeConfig, makeWebdavConfig, tmpDir, zipDir, captureHomeEnv, setHome, restoreHomeEnv } = require('../helpers/fixtures');
 const { WebdavStub } = require('../helpers/webdav-stub');
 const { unpackZip } = require('../../src/zip');
 // 自动备份由主进程调度、没有 IPC 通道，直接 require 模块——harness 与本文件共用同一份
@@ -15,17 +15,7 @@ const webdav = require('../../src/webdav');
 const { getConfig } = require('../../src/config');
 
 // 靠改 os.homedir() 的取值来模拟「另一台电脑」：Windows 认 USERPROFILE，POSIX 认 HOME
-const ORIG_HOME_ENV = { USERPROFILE: process.env.USERPROFILE, HOME: process.env.HOME };
-const setHome = (dir) => {
-  process.env.USERPROFILE = dir;
-  process.env.HOME = dir;
-};
-const restoreHomeEnv = () => {
-  for (const [k, v] of Object.entries(ORIG_HOME_ENV)) {
-    if (v === undefined) delete process.env[k];
-    else process.env[k] = v;
-  }
-};
+const ORIG_HOME_ENV = captureHomeEnv();
 
 let app;
 let stub;
@@ -68,7 +58,7 @@ before(async () => {
 after(() => {
   app.cleanup();
   stub.stop();
-  restoreHomeEnv();
+  restoreHomeEnv(ORIG_HOME_ENV);
   for (const d of [homeA, homeB]) fs.rmSync(d, { recursive: true, force: true });
 });
 

@@ -4,14 +4,21 @@ const assert = require('node:assert/strict');
 const path = require('path');
 const fs = require('fs');
 const { startApp } = require('../helpers/harness');
-const { writeSkill, makeConfig, tmpDir, zipDir } = require('../helpers/fixtures');
+const { writeSkill, makeConfig, tmpDir, zipDir, captureHomeEnv, setHome, restoreHomeEnv } = require('../helpers/fixtures');
 
 let app;
 let root;
 let agentDir;
+let savedHomeEnv;
 
 before(async () => {
+  // 「HOME 下的目录存成 ~ 形式」这条断言要求目录真的在 HOME 之下。
+  // 不能拿 os.tmpdir() 冒充 HOME —— 开发机上 TEMP 恰好在用户目录里，
+  // GitHub 的 Windows runner 上却不是（TEMP=D:\a\_temp，HOME=C:\Users\runneradmin），
+  // 那样写出来的测试在 CI 上必红。见 fixtures.js 的说明。
+  savedHomeEnv = captureHomeEnv();
   root = tmpDir('cc-skill-config-');
+  setHome(root);
   agentDir = path.join(root, 'skills');
   fs.mkdirSync(agentDir, { recursive: true });
   app = await startApp({ config: makeConfig({ agentDirs: [agentDir] }) });
@@ -20,6 +27,7 @@ before(async () => {
 after(() => {
   app.cleanup();
   fs.rmSync(root, { recursive: true, force: true });
+  restoreHomeEnv(savedHomeEnv);
 });
 
 test('config:get 返回 Agents', async () => {

@@ -42,6 +42,26 @@ function tmpDir(prefix) {
   return fs.realpathSync(fs.mkdtempSync(path.join(require('os').tmpdir(), prefix)));
 }
 
+// 改 os.homedir() 的取值来模拟一台机器：Windows 认 USERPROFILE，POSIX 认 HOME。
+//
+// 凡是「路径在 HOME 之下」才成立的行为（存成 ~ 形式、备份按本机 home 展开），
+// 测试都必须自己指定 HOME，绝不能拿 os.tmpdir() 当它 —— 只有开发机才恰好把
+// TEMP 放在用户目录里；GitHub 的 Windows runner 上 TEMP 是 D:\a\_temp、
+// HOME 是 C:\Users\runneradmin，两者毫无关系，测试会假红。
+const HOME_ENV_KEYS = ['USERPROFILE', 'HOME'];
+function captureHomeEnv() {
+  return Object.fromEntries(HOME_ENV_KEYS.map((k) => [k, process.env[k]]));
+}
+function setHome(dir) {
+  for (const k of HOME_ENV_KEYS) process.env[k] = dir;
+}
+function restoreHomeEnv(saved) {
+  for (const [k, v] of Object.entries(saved)) {
+    if (v === undefined) delete process.env[k];
+    else process.env[k] = v;
+  }
+}
+
 /** 用系统自带的 Compress-Archive 打包，刻意不复用 src/zip.js——测试的输入不该由被测代码生成 */
 function zipDir(srcDir, zipPath) {
   const { execFileSync } = require('child_process');
@@ -61,4 +81,14 @@ function zipDir(srcDir, zipPath) {
   return zipPath;
 }
 
-module.exports = { writeSkill, writeFlatSkill, makeConfig, makeWebdavConfig, tmpDir, zipDir };
+module.exports = {
+  writeSkill,
+  writeFlatSkill,
+  makeConfig,
+  makeWebdavConfig,
+  tmpDir,
+  zipDir,
+  captureHomeEnv,
+  setHome,
+  restoreHomeEnv,
+};
