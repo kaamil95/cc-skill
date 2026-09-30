@@ -53,6 +53,11 @@ const state = {
   marketCfg: { indexUrl: '', token: '' },
   // 发现弹窗的工作状态：来源页签 / 结果 / 已取回的 SKILL / 勾选集合 / 当前预览项
   market: { src: 'github', skills: [], selected: new Set(), active: null },
+  // 机器身份：标识用于和云端档案比对，名字只用于显示（见 src/config.js 的说明）
+  machine: { id: '', name: '', hostname: '' },
+  // 云端机器档案列表，以及待改名的目标（null = 改本机）
+  machines: [],
+  renameTarget: null,
   logFile: '',
 };
 
@@ -1580,8 +1585,234 @@ $('#btn-wd-backup').addEventListener('click', async () => {
     toast(t('备份失败：') + r.error, 'err');
   }
 });
+// ------------------------------ 机器与配置 ------------------------------------
+// 身份（machineId）与名字都在主进程配置里，这里只负责展示与操作。
+// 名字分两层：本机改的是自己的名字（随备份上传），给别人改的是本机别名（只影响本机显示）。
+// 身份本身不靠猜——重装系统后由用户在恢复弹窗里勾「这就是这台电脑」认领（见 src/webdav.js）。
+function renderMachineLine() {
+  $('#mc-name').textContent = state.machine.name || t('（未命名，用 hostname）');
+  $('#mc-id').textContent = state.machine.id || '—';
+  $('#mc-id').title = state.machine.id || '';
+}
+
+async function refreshMachine() {
+  const p = await api.invoke('app:paths');
+  state.machine = { id: p.machineId || '', name: p.machineName || '', hostname: p.hostname || '' };
+  renderMachineLine();
+}
+
+// 改名弹窗：本机与云端档案共用——都是「给一台机器起个名字」
+function openRenameModal(machine) {
+  state.renameTarget = machine;
+  $('#rn-input').value = machine.alias || (machine.self ? state.machine.name : machine.name) || '';
+  $('#rn-hint').textContent = machine.self
+    ? t('本机的名字会随备份上传，别的机器看到的就是它；留空则回落到 hostname。')
+    : t('给别的机器起的名字只在本机显示，不会写回云端——那台机器下次备份会用自己的名字覆盖掉。');
+  openModal('modal-rename');
+  $('#rn-input').focus();
+  $('#rn-input').select();
+}
+
+$('#btn-rename-go').addEventListener('click', async () => {
+  const target = state.renameTarget;
+  if (!target) return;
+  const r = await api.invoke('sync:renameMachine', { machineId: target.machineId, name: $('#rn-input').value });
+  if (!r.ok) return toast(r.error || t('改名失败'), 'err');
+  closeModal('modal-rename');
+  toast(t('已改名 ✓'), 'ok');
+  await refreshMachine();
+  if (!$('#modal-machines').classList.contains('hidden')) await loadMachines();
+});
+
+// 这个弹窗就是为了敲一个名字，回车即保存（和市场里的几个输入框一致）
+$('#rn-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') $('#btn-rename-go').click();
+});
+
+$('#btn-mc-rename').addEventListener('click', () => openRenameModal({ machineId: state.machine.id, self: true, name: state.machine.name, alias: '' }));
+
+$('#btn-mc-reset').addEventListener('click', async () => {
+  const ok = await confirmModal({
+    title: t('重置本机标识'),
+    message: t('换一个新的机器标识？\n云端旧档案与它的备份都留在原处，之后本机不再认领它们（需要时可以再从「云端机器档案」里认领回来）。'),
+    confirmLabel: t('重置'),
+  });
+  if (!ok) return;
+  const r = await api.invoke('sync:resetMachine');
+  if (!r.ok) return toast(r.error || t('重置失败'), 'err');
+  await refreshMachine();
+  toast(t('已重置本机标识 ✓'), 'ok');
+});
+
+// ------------------------------ 配置文件 导出 / 导入 --------------------------
+$('#btn-cfg-export').addEventListener('click', async () => {
+  const includePassword = $('#cfg-include-pass').checked;
+  const r = await api.invoke('config:exportFile', { includePassword });
+  if (r.canceled) return;
+  if (!r.ok) return toast(r.error || t('导出失败'), 'err');
+  const msg = tf('已导出 {n} 个 Agent / {m} 个项目', { n: r.agents, m: r.projects });
+  toast(includePassword ? msg + t('（含 WebDAV 密码）') : msg, 'ok');
+});
+
+$('#btn-cfg-import').addEventListener('click', async () => {
+  const r = await api.invoke('config:importFile');
+  if (r.canceled) return;
+  if (!r.ok) return toast(r.error || t('导入失败'), 'err');
+  const s = r.summary || {};
+  // 先把后果说清楚：Agent 与项目是替换，不是合并
+  const lines = [
+    tf('用文件里的 {n} 个 Agent / {m} 个项目替换本机的 {a} 个 / {b} 个？', {
+      n: s.agents,
+      m: s.projects,
+      a: (state.agents || []).length,
+      b: (state.projects || []).length,
+    }),
+    t('界面偏好会合并保留；本机已起过的机器名不会被覆盖。'),
+  ];
+  if (s.webdav)
+    lines.push(s.password ? t('文件里带了 WebDAV 设置与密码，会一并导入。') : t('文件里带了 WebDAV 设置（不含密码），会一并导入，密码保留本机的。'));
+  const ok = await confirmModal({ title: t('从文件导入配置'), message: lines.join('\n'), confirmLabel: t('导入'), danger: false });
+  if (!ok) return;
+
+  const applied = await api.invoke('config:importApply', { payload: r.payload, includeWebdav: !!s.webdav });
+  if (!applied.ok) return toast(applied.error || t('导入失败'), 'err');
+  await refreshMachine();
+  await scan();
+  toast(t('配置已导入 ✓'), 'ok');
+});
+
+// ------------------------------ 云端机器档案 ----------------------------------
+async function loadMachines() {
+  $('#mc-status').textContent = t('正在读取云端档案…');
+  const r = await api.invoke('sync:machines');
+  if (!r.ok) {
+    state.machines = [];
+    $('#mc-list').innerHTML = '';
+    $('#mc-orphan-box').hidden = true;
+    $('#mc-status').textContent = '✗ ' + (r.error || t('读取失败'));
+    return;
+  }
+  state.machines = r.machines || [];
+  $('#mc-status').textContent = r.remote ? tf('远程目录：{p}', { p: r.remote }) : '';
+  renderMachines(r);
+}
+
+function machineBackupLine(m) {
+  if (!m.backup || !m.backup.created) return t('云端还没有这台机器的备份');
+  const when = new Date(m.backup.created).toLocaleString();
+  if (!m.backup.present) return tf('最后备份 {t} · 备份已不在云端（可能被保留策略清掉了）', { t: when });
+  return tf('最后备份 {t} · {n} 个 SKILL · {s}', { t: when, n: m.backup.entries, s: fmtSize(m.backup.size) });
+}
+
+function machineRowHTML(m) {
+  const acts = [];
+  // 读不出标识的坏档案只能删——改名/认领都要有 id 才成立
+  if (m.machineId) acts.push(btnHTML('rename', { id: m.machineId }, t('改名')));
+  if (m.self) {
+    acts.push(`<span class="mc-tag">${esc(t('本机'))}</span>`);
+  } else {
+    if (m.machineId) acts.push(btnHTML('adopt', { id: m.machineId }, t('设为我的机器标识')));
+    acts.push(btnHTML('forget', { file: m.file }, t('移出列表')));
+    acts.push(btnHTML('purge', { file: m.file }, t('删除档案与备份'), ' danger'));
+  }
+  return `<div class="mc-row${m.self ? ' mc-row-self' : ''}">
+    <div class="mc-main">
+      <div class="mc-title">${esc(m.name)}${m.machineId ? '' : ' ⚠'}</div>
+      <div class="mc-sub">${esc([m.hostname, m.machineId ? m.machineId.slice(0, 8) : ''].filter(Boolean).join('   '))}</div>
+      <div class="mc-detail">${esc(machineBackupLine(m))}</div>
+    </div>
+    <div class="mc-acts">${acts.join('')}</div>
+  </div>`;
+}
+
+/** 一行里的动作按钮：dataset 带上动作与目标，事件代理统一处理 */
+function btnHTML(act, data, label, extraClass = '') {
+  const attrs = Object.entries(data)
+    .map(([k, v]) => ` data-${k}="${esc(v)}"`)
+    .join('');
+  return `<button class="btn sm mc-act${extraClass}" data-act="${act}"${attrs}>${esc(label)}</button>`;
+}
+
+function renderMachines(r) {
+  $('#mc-list').innerHTML = state.machines.map(machineRowHTML).join('');
+  const orphans = r.orphans || [];
+  $('#mc-orphan-box').hidden = !orphans.length;
+  $('#mc-orphan-list').innerHTML = orphans
+    .map(
+      (n) => `<div class="mc-row">
+        <div class="mc-main"><div class="mc-sub">${esc(n)}</div></div>
+        <div class="mc-acts">${btnHTML('deleteBackup', { name: n }, t('删除'), ' danger')}</div>
+      </div>`
+    )
+    .join('');
+}
+
+async function onMachineAction(e) {
+  const btn = e.target.closest('.mc-act');
+  if (!btn) return;
+  const { act, id, file, name } = btn.dataset;
+  const m = state.machines.find((x) => x.machineId === id);
+  if (act === 'rename') {
+    if (m) openRenameModal(m);
+    return;
+  }
+  let ask = null;
+  let run = null;
+  if (act === 'adopt') {
+    ask = {
+      title: t('设为我的机器标识'),
+      message: tf('把本机标识改成「{n}」，从而认领它的备份？\n本机现在的标识会被替换掉，之后「本机的备份」指的就是这一台了。', { n: (m && m.name) || id }),
+      confirmLabel: t('认领'),
+      danger: false,
+    };
+    run = () => api.invoke('sync:adoptMachine', { machineId: id });
+  } else if (act === 'forget') {
+    ask = {
+      title: t('移出列表'),
+      message: t('把这台机器从档案列表里移出？\n它的备份包留在云端不动，需要时还能手动恢复。'),
+      confirmLabel: t('移出'),
+    };
+    run = () => api.invoke('sync:forgetMachine', { file });
+  } else if (act === 'purge') {
+    ask = {
+      title: t('删除档案与备份'),
+      message: t('把这台机器从档案列表里移出，并连它最近那一份备份一起从云端永久删除？\n这个操作不可撤销。'),
+      confirmLabel: t('删除'),
+    };
+    run = () => api.invoke('sync:forgetMachine', { file, deleteBackups: true });
+  } else if (act === 'deleteBackup') {
+    ask = {
+      title: t('删除备份'),
+      message: tf('从云端永久删除 {n}？\n这个操作不可撤销。', { n: name }),
+      confirmLabel: t('删除'),
+    };
+    run = () => api.invoke('sync:deleteBackup', { name });
+  }
+  if (!ask || !run) return;
+  if (!(await confirmModal(ask))) return;
+  btn.disabled = true;
+  const r = await run();
+  btn.disabled = false;
+  if (!r.ok) return toast(r.error || t('操作失败'), 'err');
+  if (act === 'adopt') {
+    await refreshMachine();
+    toast(t('已认领这台机器 ✓'), 'ok');
+  } else {
+    toast(t('已完成 ✓'), 'ok');
+  }
+  await loadMachines();
+}
+
+$('#mc-list').addEventListener('click', onMachineAction);
+$('#mc-orphan-list').addEventListener('click', onMachineAction);
+$('#btn-mc-machines').addEventListener('click', async () => {
+  openModal('modal-machines');
+  await loadMachines();
+});
+
 // 点击「从云端下载」：弹窗先行（瞬间可见）→ 后台只取廉价元数据 → 用户点确认后才真正下载整包
 let restoreSeq = 0;
+
 const RESTORE_FIELDS = ['#rv-host', '#rv-time', '#rv-remote', '#rv-size', '#rv-content', '#rv-source'];
 
 // 恢复范围：按 Agent 勾选要重建哪些全局 SKILL，默认全选。
@@ -1659,24 +1890,51 @@ $('#btn-wd-restore').addEventListener('click', async () => {
   $('#rv-source').textContent = info.source === 'local' ? t('本机上次备份') : t('云端最新一条（本机尚未备份过）');
   // 按钮的可用状态由 syncRestoreSelection 决定（全选/未选/旧版无勾选框三种情况都已覆盖）
   renderRestoreScope(info);
+  renderAdoptRow(info);
   $('#rv-status').textContent = '';
 });
+
+// 认领开关：备份来自别的机器时才有可勾的东西（重装系统后就靠它把项目一起认回来）。
+// 旧版备份没有侧车元数据，拿不到对方标识，也就无从认领——那种情况不显示这一行。
+function renderAdoptRow(info) {
+  const canAdopt = !!info.machineId && !info.sameMachine;
+  $('#rv-adopt-row').hidden = !canAdopt;
+  $('#rv-adopt').checked = false;
+  if (!canAdopt) return;
+  const label = info.machineName || info.hostname || t('另一台电脑');
+  $('#rv-adopt-text').textContent = tf('这份备份来自「{name}」，不是本机。勾上表示这就是这台电脑（例如刚重装过系统），项目配置与 HOME 之外的目录会一并还原。', {
+    name: label,
+  });
+}
 
 $('#btn-restore-confirm').addEventListener('click', async () => {
   const btn = $('#btn-restore-confirm');
   btn.disabled = true;
   $('#rv-status').textContent = t('正在下载并恢复…');
   try {
-    const r = await api.invoke('sync:restoreApply', { name: state.restoreName, agentIds: state.restoreAgents });
+    const adoptMachine = !$('#rv-adopt-row').hidden && $('#rv-adopt').checked;
+    const r = await api.invoke('sync:restoreApply', { name: state.restoreName, agentIds: state.restoreAgents, adoptMachine });
     if (!r.ok) {
       $('#rv-status').textContent = '✗ ' + r.error;
       return toast(r.error, 'err');
     }
     toast(tf('已从云端恢复 {n} 个 SKILL ✓', { n: r.restored }), 'ok');
+    if (r.adoptedMachine) {
+      await refreshMachine();
+      toast(t('已认领这台机器，本机标识已更新 ✓'), 'ok');
+    }
     if (r.relocated?.length) toast(tf('{n} 个旧版目录已按本机用户目录重新映射', { n: r.relocated.length }), 'ok');
     // 下面两条是设计如此（不算失败），用中性级别，免得跟真正的错误混在一起
     if (r.skippedProjects) toast(tf('未恢复 {n} 个项目 SKILL（随项目仓库走）', { n: r.skippedProjects }), '');
-    if (r.projectConfigSkipped) toast(tf('未恢复 {n} 个项目配置（不同电脑的项目路径不通用）', { n: r.projectConfigSkipped }), '');
+    // 这句话负责指路：同类情形下用户可以重新打开弹窗勾「这就是这台电脑」再来一次
+    if (r.projectConfigSkipped) {
+      toast(
+        tf('未恢复 {n} 个项目配置：这份备份不算本机的。若这就是本机（例如刚重装过系统），重新打开弹窗勾选「这就是这台电脑」再来一次。', {
+          n: r.projectConfigSkipped,
+        }),
+        ''
+      );
+    }
     if (r.skippedAgents) toast(tf('未恢复 {n} 个未勾选 Agent 的 SKILL', { n: r.skippedAgents }), '');
     // 这两种是「本该恢复却没恢复成」，必须报出来——静默跳过正是当初那个缺陷的形态
     if (r.skippedExternal?.length) {
@@ -1810,6 +2068,7 @@ function openSettings() {
   fillThemeInputs(currentThemeSel());
   themeSnapshot = readThemeInputs();
   fillProxyInputs(state.proxy);
+  renderMachineLine();
   openModal('modal-settings');
 }
 
@@ -2271,6 +2530,7 @@ api.onSyncAuto?.((r) => {
     state.ui = p.ui || { lang: 'auto' };
     state.proxy = p.proxy || state.proxy;
     state.marketCfg = p.market || state.marketCfg;
+    state.machine = { id: p.machineId || '', name: p.machineName || '', hostname: p.hostname || '' };
     // 让样式表知道平台：macOS 用系统红绿灯，需要隐藏自绘窗口按钮并给左上角留位
     document.body.dataset.platform = p.platform || '';
     applyOverlay(state.ui);

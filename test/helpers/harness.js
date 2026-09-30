@@ -36,6 +36,8 @@ function makeElectronStub({ dataDir, workDir, trashItem }) {
     windowOptions: {},
     proxyConfigs: [],
   };
+  // 文件对话框的返回值由测试摆布：openPaths 非空即「选了这个文件」，savePath 同理
+  const dialogState = { openPaths: [], savePath: null };
   const webContents = {
     on(event, fn) {
       if (!windowState.listeners.has(event)) windowState.listeners.set(event, []);
@@ -96,7 +98,12 @@ function makeElectronStub({ dataDir, workDir, trashItem }) {
     // WebDAV / 市场的集成测试靠它打本地 HTTP 服务器，这里不能返回假响应
     session: { defaultSession: { setProxy: (cfg) => windowState.proxyConfigs.push(cfg) } },
     net: { fetch: (...args) => fetch(...args) },
-    dialog: { showOpenDialog: async () => ({ canceled: true, filePaths: [] }) },
+    // 文件对话框桩：默认「用户取消了」，测试先往 dialogState 里放路径再调对应的通道。
+    // 配置导出/导入这类通道没有别的入口，只能靠它把路径喂进去
+    dialog: {
+      showOpenDialog: async () => (dialogState.openPaths.length ? { canceled: false, filePaths: dialogState.openPaths } : { canceled: true, filePaths: [] }),
+      showSaveDialog: async () => (dialogState.savePath ? { canceled: false, filePath: dialogState.savePath } : { canceled: true }),
+    },
     shell: {
       // 默认真的把路径删掉，模拟「已移入回收站」
       trashItem: trashItem || (async (p) => (fs.rmSync(p, { recursive: true, force: true }), true)),
@@ -107,7 +114,7 @@ function makeElectronStub({ dataDir, workDir, trashItem }) {
       },
     },
   };
-  return { stub, handlers, windowState };
+  return { stub, handlers, windowState, dialogState };
 }
 
 async function startApp({ config, trashItem } = {}) {
@@ -119,7 +126,7 @@ async function startApp({ config, trashItem } = {}) {
   // 必须先写好配置：main.js 载入时就读它
   fs.writeFileSync(path.join(dataDir, 'config.json'), JSON.stringify(config || DEFAULT_CONFIG, null, 2), 'utf8');
 
-  const { stub, handlers, windowState } = makeElectronStub({ dataDir, workDir, trashItem });
+  const { stub, handlers, windowState, dialogState } = makeElectronStub({ dataDir, workDir, trashItem });
   const origLoad = Module._load;
   Module._load = function (request) {
     return request === 'electron' ? stub : origLoad.apply(this, arguments);
@@ -154,6 +161,7 @@ async function startApp({ config, trashItem } = {}) {
     backgroundColors: () => windowState.backgroundColors,
     windowOptions: () => windowState.windowOptions,
     proxyConfigs: () => windowState.proxyConfigs,
+    dialog: () => dialogState,
     // 真实触发主进程挂在窗口上的事件（如 will-navigate），用来验证守卫确实拦住了
     emitWebContents(event, ...args) {
       for (const fn of windowState.listeners.get(event) || []) fn(...args);

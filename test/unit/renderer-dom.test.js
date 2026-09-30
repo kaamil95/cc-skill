@@ -238,9 +238,54 @@ test('skill-view.js 在 app.js 之前加载（app.js 顶部就解构它）', () 
 
 test('新加的界面文案都有英文对照（英文环境下不会掉出中文）', () => {
   const dict = read('renderer/i18n.js');
-  for (const key of ['本体', '{n} 个链接', '通过链接共用，文件不在这里', '共用', '项目 · {name}']) {
+  for (const key of [
+    '本体',
+    '{n} 个链接',
+    '通过链接共用，文件不在这里',
+    '共用',
+    '项目 · {name}',
+    // 机器与配置 / 云端机器档案
+    '机器与配置',
+    '机器名',
+    '机器标识',
+    '重置标识',
+    '云端机器档案',
+    '导出到文件',
+    '从文件导入',
+    '导出时包含 WebDAV 密码',
+    '设为我的机器标识',
+    '移出列表',
+    '删除档案与备份',
+    '本机',
+    '另一台电脑',
+    '未被任何档案引用的备份',
+    '这份备份来自「{name}」，不是本机。勾上表示这就是这台电脑（例如刚重装过系统），项目配置与 HOME 之外的目录会一并还原。',
+    '未恢复 {n} 个项目配置：这份备份不算本机的。若这就是本机（例如刚重装过系统），重新打开弹窗勾选「这就是这台电脑」再来一次。',
+  ]) {
     assert.ok(dict.includes(`'${key}':`) || dict.includes(`"${key}":`), 'i18n.js 缺少词条：' + key);
   }
+});
+
+// ------------------------------ 机器身份 --------------------------------------
+// 踩过：机器标识是 config.json 里的随机 UUID，重装系统后变成新的，于是「同一台电脑」被
+// 当成新机器 —— 项目配置与 HOME 之外的目录都不还原。身份不靠硬件指纹去猜（重装恰好让
+// OS 级指纹失效，而硬件序列号最容易撞号，认错成「同一台」比认成「不同台」危险得多），
+// 改成由用户在恢复弹窗里明确认领。
+test('恢复弹窗里的认领开关默认收起，拿到对方标识才显示', () => {
+  assert.match(html, /id="rv-adopt-row"[^>]*hidden/, '认领行默认必须是收起的');
+  assert.match(appJs, /const canAdopt = !!info\.machineId && !info\.sameMachine/, '只有拿到对方标识、且确认不是本机时才给认领');
+  assert.match(appJs, /const adoptMachine = !\$\('#rv-adopt-row'\)\.hidden/, '收起时一律当成没勾，不看残留的勾选状态');
+  const call = appJs.match(/api\.invoke\('sync:restoreApply', \{[^}]*\}/);
+  assert.ok(call && /adoptMachine/.test(call[0]), '确认时要把勾选状态一起传给 restoreApply');
+});
+
+test('认领与重置走同一个写入点，身份不接受任意字符串', () => {
+  const webdav = read('src/webdav.js');
+  assert.match(webdav, /function adoptMachineId\(id\)/, '认领收在一个函数里');
+  assert.match(webdav, /MACHINE_ID_RE\.test\(clean\)/, '标识要过校验，不合法直接拒');
+  assert.match(appJs, /sync:resetMachine/, '重置标识是认领的反向出口');
+  // 机器标识绝不进备份包 / 配置文件——它是身份，不是配置
+  assert.match(read('src/config.js'), /machineId 不跟着走/);
 });
 
 // ------------------------------ 目标目录选择器 --------------------------------

@@ -321,7 +321,8 @@
     '自动备份失败：': "Auto-backup failed: ",
     '自动备份已暂停：本机还没有备份过，请先手动备份一次': 'Auto-backup is paused: this machine has not backed up yet — back up once manually to enable it',
     '已自动备份 {n} 个 SKILL ✓': 'Auto-backed up {n} skills ✓',
-    '未恢复 {n} 个项目配置（不同电脑的项目路径不通用）': '{n} project entries were not restored (project paths do not carry over between machines)',
+    '未恢复 {n} 个项目配置：这份备份不算本机的。若这就是本机（例如刚重装过系统），重新打开弹窗勾选「这就是这台电脑」再来一次。':
+      '{n} project entries were not restored: this backup does not count as this machine’s. If it is this machine (a fresh OS install, say), reopen the dialog, tick "This is this computer" and try again.',
     '从云端恢复最近一次备份？\n注意：与备份同名的本地 SKILL 将被云端版本覆盖！': "Restore the latest backup from the cloud?\nNote: local skills with the same name will be OVERWRITTEN by the cloud version!",
     '✗ 恢复失败：': "✗ Restore failed: ",
     '恢复失败：': "Restore failed: ",
@@ -471,6 +472,74 @@
     '合并': 'Merge',
     '开始上传': 'Start upload',
     '恢复默认配置': 'Reset to defaults',
+
+    // ---- 机器与配置 / 云端机器档案 ----
+    '机器与配置': 'Machine & config',
+    '机器名': 'Machine name',
+    '机器标识': 'Machine id',
+    '重置标识': 'Reset id',
+    '云端机器档案': 'Cloud machine profiles',
+    '导出到文件': 'Export to file',
+    '从文件导入': 'Import from file',
+    '导出时包含 WebDAV 密码': 'Include the WebDAV password when exporting',
+    '（未命名，用 hostname）': '(unnamed, using the hostname)',
+    '机器标识决定「云端哪份备份是本机的」。重装系统后会生成新标识，恢复时勾一下「这就是这台电脑」即可认领回来；机器名只用于显示，随备份上传。':
+      'The machine id decides which cloud backup counts as this machine’s. A fresh OS install mints a new one — tick "This is this computer" when restoring to claim the old one back. The name is display-only and travels with the backup.',
+    '本机的名字会随备份上传，别的机器看到的就是它；留空则回落到 hostname。':
+      'Your machine’s name travels with the backup and is what other machines see. Leave it empty to fall back to the hostname.',
+    '给别的机器起的名字只在本机显示，不会写回云端——那台机器下次备份会用自己的名字覆盖掉。':
+      'A name you give another machine is local-only; it is not written back to the cloud (that machine’s next backup would overwrite it anyway).',
+    '改名失败': 'Rename failed',
+    '已改名 ✓': 'Renamed ✓',
+    '重置本机标识': 'Reset this machine’s id',
+    '换一个新的机器标识？\n云端旧档案与它的备份都留在原处，之后本机不再认领它们（需要时可以再从「云端机器档案」里认领回来）。':
+      'Mint a new machine id?\nThe old profile and its backups stay in the cloud; this machine simply stops claiming them (you can claim them back from "Cloud machine profiles").',
+    '重置': 'Reset',
+    '重置失败': 'Reset failed',
+    '已重置本机标识 ✓': 'Machine id reset ✓',
+    '导出失败': 'Export failed',
+    '已导出 {n} 个 Agent / {m} 个项目': 'Exported {n} agents / {m} projects',
+    '（含 WebDAV 密码）': ' (including the WebDAV password)',
+    '用文件里的 {n} 个 Agent / {m} 个项目替换本机的 {a} 个 / {b} 个？':
+      'Replace this machine’s {a} agents / {b} projects with the file’s {n} / {m}?',
+    '界面偏好会合并保留；本机已起过的机器名不会被覆盖。':
+      'Appearance preferences are merged in; a machine name you already set here is kept.',
+    '文件里带了 WebDAV 设置与密码，会一并导入。': 'The file carries WebDAV settings and a password — both will be imported.',
+    '文件里带了 WebDAV 设置（不含密码），会一并导入，密码保留本机的。':
+      'The file carries WebDAV settings without a password — they will be imported and your local password kept.',
+    '导入': 'Import',
+    '正在读取云端档案…': 'Reading cloud profiles…',
+    '读取失败': 'Failed to read',
+    '远程目录：{p}': 'Remote directory: {p}',
+    '云端还没有这台机器的备份': 'This machine has no backup in the cloud yet',
+    '最后备份 {t} · 备份已不在云端（可能被保留策略清掉了）': 'Last backup {t} · the backup is no longer in the cloud (the retention policy may have removed it)',
+    '最后备份 {t} · {n} 个 SKILL · {s}': 'Last backup {t} · {n} skills · {s}',
+    '本机': 'This machine',
+    '设为我的机器标识': 'Make it my machine id',
+    '移出列表': 'Remove from list',
+    '删除档案与备份': 'Delete profile and backup',
+    '删除备份': 'Delete backup',
+    '把本机标识改成「{n}」，从而认领它的备份？\n本机现在的标识会被替换掉，之后「本机的备份」指的就是这一台了。':
+      'Change this machine’s id to "{n}" and claim its backups?\nYour current id is replaced — from then on "my backup" means that machine’s.',
+    '认领': 'Claim',
+    '把这台机器从档案列表里移出？\n它的备份包留在云端不动，需要时还能手动恢复。':
+      'Remove this machine from the profile list?\nIts backup stays in the cloud and can still be restored by hand.',
+    '移出': 'Remove',
+    '把这台机器从档案列表里移出，并连它最近那一份备份一起从云端永久删除？\n这个操作不可撤销。':
+      'Remove this machine from the profile list AND permanently delete its most recent backup from the cloud?\nThis cannot be undone.',
+    '从云端永久删除 {n}？\n这个操作不可撤销。': 'Permanently delete {n} from the cloud?\nThis cannot be undone.',
+    '操作失败': 'Action failed',
+    '已完成 ✓': 'Done ✓',
+    '已认领这台机器 ✓': 'Machine claimed ✓',
+    '已认领这台机器，本机标识已更新 ✓': 'Machine claimed — this machine’s id has been updated ✓',
+    '另一台电脑': 'another computer',
+    '每台在这里备份过的机器一份档案。备份包的归属只能靠档案里的记录得知（包名不带机器标识），所以「删除备份」删的是它记着的那一份；更早的快照由云端保留策略收敛。':
+      'One profile per machine that has backed up here. Which backup belongs to whom is only knowable from the profile record (file names carry no machine id), so "delete backup" removes the one it records; older snapshots are culled by the cloud retention policy.',
+    '未被任何档案引用的备份': 'Backups no profile refers to',
+    '这份备份来自「{name}」，不是本机。勾上表示这就是这台电脑（例如刚重装过系统），项目配置与 HOME 之外的目录会一并还原。':
+      'This backup came from "{name}", not from this machine. Tick this if it is this computer (a fresh OS install, say) — project entries and directories outside HOME are then restored too.',
+    '保存': 'Save',
+    '改名': 'Rename',
   };
 
   let lang = localStorage.getItem('cc-skill-lang') || 'auto';

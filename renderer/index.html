@@ -294,6 +294,33 @@
           </div>
           <div class="hint" id="wd-status" style="margin-top:8px">备份内容 = 全局 + 项目内所有实体 SKILL（链接不会上传）；密码保存在本机配置文件中，请注意磁盘安全。</div>
         </div>
+        <div class="form-label" style="margin-top:18px" data-i18n="机器与配置">机器与配置</div>
+        <div class="agent-block">
+          <div class="wd-grid">
+            <label data-i18n="机器名">机器名</label>
+            <div class="mc-inline">
+              <span id="mc-name"></span>
+              <button class="btn sm" id="btn-mc-rename" data-i18n="改名">改名</button>
+            </div>
+            <label data-i18n="机器标识">机器标识</label>
+            <div class="mc-inline">
+              <span id="mc-id"></span>
+              <button class="btn sm" id="btn-mc-reset" data-i18n="重置标识">重置标识</button>
+            </div>
+          </div>
+          <div class="wd-actions">
+            <button class="btn sm" id="btn-mc-machines" data-i18n="云端机器档案">云端机器档案</button>
+            <button class="btn sm" id="btn-cfg-export" data-i18n="导出到文件">导出到文件</button>
+            <button class="btn sm" id="btn-cfg-import" data-i18n="从文件导入">从文件导入</button>
+            <label class="mc-check">
+              <input type="checkbox" id="cfg-include-pass" />
+              <span data-i18n="导出时包含 WebDAV 密码">导出时包含 WebDAV 密码</span>
+            </label>
+          </div>
+          <div class="hint" style="margin-top:8px" data-i18n="机器标识决定「云端哪份备份是本机的」。重装系统后会生成新标识，恢复时勾一下「这就是这台电脑」即可认领回来；机器名只用于显示，随备份上传。">
+            机器标识决定「云端哪份备份是本机的」。重装系统后会生成新标识，恢复时勾一下「这就是这台电脑」即可认领回来；机器名只用于显示，随备份上传。
+          </div>
+        </div>
         <div class="form-label" style="margin-top:18px" data-i18n="网络代理">网络代理</div>
         <div class="agent-block">
           <div class="wd-grid">
@@ -362,6 +389,10 @@
           <div class="rs-list" id="rv-agents"></div>
           <div class="hint" id="rv-skip" hidden></div>
         </div>
+        <label class="adopt-row" id="rv-adopt-row" hidden>
+          <input type="checkbox" id="rv-adopt" />
+          <span id="rv-adopt-text"></span>
+        </label>
         <div class="hint" id="rv-status" style="margin-bottom:8px"></div>
         <div class="restore-warn" data-i18n="恢复将覆盖本机同名的全局 SKILL">恢复将覆盖本机同名的全局 SKILL</div>
       </div>
@@ -372,9 +403,51 @@
     </div>
   </div>
 
+  <!-- 云端机器档案：列云端备份过的每台机器，可改名 / 认领 / 移出 / 删备份 -->
+  <div class="modal-overlay hidden" id="modal-machines">
+    <div class="modal modal-wide">
+      <div class="modal-head">
+        <div class="modal-title" data-i18n="云端机器档案">云端机器档案</div>
+        <button class="modal-close" data-close="modal-machines">×</button>
+      </div>
+      <div class="modal-body">
+        <p class="hint" data-i18n="每台在这里备份过的机器一份档案。备份包的归属只能靠档案里的记录得知（包名不带机器标识），所以「删除备份」删的是它记着的那一份；更早的快照由云端保留策略收敛。">
+          每台在这里备份过的机器一份档案。备份包的归属只能靠档案里的记录得知（包名不带机器标识），所以「删除备份」删的是它记着的那一份；更早的快照由云端保留策略收敛。
+        </p>
+        <div id="mc-status" class="hint"></div>
+        <div id="mc-list"></div>
+        <div id="mc-orphan-box" hidden>
+          <div class="mc-group" data-i18n="未被任何档案引用的备份">未被任何档案引用的备份</div>
+          <div id="mc-orphan-list"></div>
+        </div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn" data-close="modal-machines" data-i18n="关闭">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 改名：本机改自己的名字，别的机器记成本机别名 -->
+  <div class="modal-overlay hidden" id="modal-rename">
+    <div class="modal" style="width:400px">
+      <div class="modal-head">
+        <div class="modal-title" data-i18n="改名">改名</div>
+        <button class="modal-close" data-close="modal-rename">×</button>
+      </div>
+      <div class="modal-body">
+        <label class="form-label" for="rn-input" data-i18n="机器名">机器名</label>
+        <input id="rn-input" class="input" maxlength="40" />
+        <p class="hint" id="rn-hint"></p>
+      </div>
+      <div class="modal-foot">
+        <button class="btn" data-close="modal-rename" data-i18n="取消">取消</button>
+        <button class="btn primary" id="btn-rename-go" data-i18n="保存">保存</button>
+      </div>
+    </div>
+  </div>
+
   <!-- 通用确认弹窗：替代原生 confirm，风格与「从云端恢复」一致 -->
-  <div class="modal-overlay hidden" id="modal-confirm">
-    <div class="modal" style="width:470px">
+  <div class="modal-overlay hidden" id="modal-confirm">    <div class="modal" style="width:470px">
       <div class="modal-body" style="padding:22px 24px">
         <div class="restore-title"><span class="restore-ico" id="cf-ico">⚠</span><span id="cf-title"></span></div>
         <div class="cf-msg" id="cf-msg"></div>

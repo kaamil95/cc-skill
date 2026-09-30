@@ -185,31 +185,71 @@ test('HOME 之外的 Agent 目录：同机恢复照样还原', async () => {
   assert.ok(fs.existsSync(path.join(agentDir, 'alpha', 'SKILL.md')), 'HOME 之下的照旧');
 });
 
-test('本机已经不再用的绝对路径目录，仍然跳过（不造幽灵目录）', async () => {
-  // 上面那条规则的另一面：绝对路径只有「本机自己的、且现在还在配置里」才认。
-  // 目录已经从配置里摘掉之后，照着备份包写回去只会得到一棵没人读的目录树 ——
-  // 那正是换机恢复要避免的事，同机也一样。
-  const stale = tmpDir('cc-skill-stale-');
-  extraDirs.push(stale);
-  writeSkill(stale, 'stale-skill');
-  const dirs = [agentDir, outsideDir, stale];
-  await app.invoke('config:set', { agents: [{ id: 'claude-code', name: 'Claude Code', dirs }] });
-  assert.equal((await app.invoke('sync:backup')).ok, true);
-
-  // 备份完就把这个目录从配置里摘掉（outsideDir 留着，它才是本机在用的那个）
-  await app.invoke('config:set', { agents: [{ id: 'claude-code', name: 'Claude Code', dirs: [agentDir, outsideDir] }] });
+test('不是本机自己的备份：绝对路径目录与项目配置一律跳过，不造幽灵目录', async () => {
+  // 上面那条规则的另一面：备份里的绝对路径只有「本机自己的」才认。换台机器的备份里，
+  // 那些路径指的是原机器的位置 —— 照着建只会得到一棵没人读的目录树，
+  // 正是当初「换台电脑恢复出一堆幽灵目录」那个缺陷。
+  const projDir = tmpDir('cc-skill-proj-');
+  extraDirs.push(projDir);
+  await app.invoke('config:set', { projects: [{ id: 'p1', dir: projDir, name: 'proj' }] });
+  const up = await app.invoke('sync:backup');
+  assert.equal(up.ok, true, JSON.stringify(up));
   const info = await app.invoke('sync:restoreInfo');
-  fs.rmSync(stale, { recursive: true, force: true });
+
+  // 冒充「另一台机器」：换掉本机标识，再恢复同一份备份
+  await app.invoke('sync:resetMachine');
+  fs.rmSync(outsideDir, { recursive: true, force: true });
 
   const r = await app.invoke('sync:restoreApply', { name: info.name });
   assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(r.sameMachine, false);
+  assert.equal(r.projectConfigSkipped, 1, '不同机器的项目路径不通用');
   assert.deepEqual(
     r.skippedExternal.map((x) => x.dir),
-    [stale],
-    '只该跳过本机不再使用的那个目录'
+    [outsideDir],
+    '别的机器的绝对路径应被报成无法映射'
   );
-  assert.ok(!fs.existsSync(path.join(stale, 'stale-skill')), '不该照着备份包重建目录');
-  assert.ok(fs.existsSync(path.join(outsideDir, 'outside', 'SKILL.md')), '本机在用的照旧还原');
+  assert.ok(!fs.existsSync(path.join(outsideDir, 'outside', 'SKILL.md')), '不该照着备份包重建目录');
+  assert.ok(fs.existsSync(path.join(agentDir, 'alpha', 'SKILL.md')), '~ 形式照旧还原');
+  await app.invoke('config:set', { projects: [] });
+});
+
+test('重装系统后认领：项目配置与 HOME 之外的目录一次全回来', async () => {
+  const projDir = tmpDir('cc-skill-proj-');
+  extraDirs.push(projDir);
+  // 第一台机器：项目 + HOME 之外的目录都配上，然后备份
+  await app.invoke('config:set', {
+    agents: [{ id: 'claude-code', name: 'Claude Code', dirs: [agentDir, outsideDir] }],
+    projects: [{ id: 'p1', dir: projDir, name: 'proj' }],
+  });
+  writeSkill(outsideDir, 'outside');
+  const up = await app.invoke('sync:backup');
+  assert.equal(up.ok, true, JSON.stringify(up));
+  const machineA = app.readConfig().machineId;
+
+  // 重装系统：新标识，配置回到初始状态（没有项目、没有 HOME 之外的目录）
+  const reset = await app.invoke('sync:resetMachine');
+  assert.notEqual(reset.machineId, machineA, '重装后是个新标识');
+  await app.invoke('config:set', { agents: [{ id: 'claude-code', name: 'Claude Code', dirs: [agentDir] }], projects: [] });
+  fs.rmSync(outsideDir, { recursive: true, force: true });
+
+  const info = await app.invoke('sync:restoreInfo');
+  assert.equal(info.sameMachine, false, '换了标识，这份备份就不再算本机的');
+  assert.equal(info.machineId, machineA, '弹窗要拿到备份来自哪台机器，才能提示认领');
+
+  const adopted = await app.invoke('sync:restoreApply', { name: info.name, adoptMachine: true });
+  assert.equal(adopted.ok, true, JSON.stringify(adopted));
+  assert.equal(adopted.adoptedMachine, true);
+  assert.equal(adopted.sameMachine, true);
+  assert.equal(app.readConfig().machineId, machineA, '认领就是认下这个标识');
+  assert.equal(adopted.projectConfigSkipped, 0, '认领之后项目配置要还原');
+  assert.deepEqual(adopted.skippedExternal, [], '认领之后 HOME 之外的目录也要还原');
+  assert.ok(fs.existsSync(path.join(outsideDir, 'outside', 'SKILL.md')), '目录真的落回来了');
+  assert.deepEqual(
+    app.readConfig().projects.map((p) => p.id),
+    ['p1']
+  );
+  await app.invoke('config:set', { projects: [] });
 });
 
 test('备份包损坏时失败且不落地任何文件、不残留临时目录', async () => {
@@ -248,4 +288,119 @@ test('恢复会一并还原备份里的设置（Agents / 项目 / 语言）', as
   assert.equal(ui.lang, 'zh', '语言以备份为准');
   assert.equal(typeof ui.overlayBlur, 'number', '遮罩配置不该被清掉');
   assert.equal(typeof ui.overlayDim, 'number');
+});
+
+// ------------------------------ 机器档案 --------------------------------------
+// 这一段按「本机标识还是原来那个」为前提写，所以改标识的用例放在最后。
+const FOREIGN_ZIP = 'cc-skill-backup-20260101-010101.zip';
+const foreignMeta = () => ({
+  machineId: 'foreign-machine',
+  machineName: '旧笔记本',
+  hostname: 'OLD-PC',
+  name: FOREIGN_ZIP,
+  created: '2026-01-01T01:01:01.000Z',
+  entries: 2,
+  size: 50,
+});
+
+test('机器档案：列出云端各台机器，本机排在最前', async () => {
+  stub.writeJson('/dav/' + FOREIGN_ZIP, { fake: true });
+  stub.writeJson('/dav/host-foreign.json', foreignMeta());
+
+  const r = await app.invoke('sync:machines');
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(r.machines[0].self, true, '本机排最前');
+  assert.equal(r.machines[0].name, os.hostname(), '没起过名就用 hostname');
+  // 名字里有非法字符的机器标识不该被当成「本机」
+  assert.equal(r.machines.filter((m) => m.self).length, 1);
+
+  const foreign = r.machines.find((m) => m.machineId === 'foreign-machine');
+  assert.equal(foreign.name, '旧笔记本', '没别名时用那台机器自己声明的名字');
+  assert.equal(foreign.hostname, 'OLD-PC', '真实 hostname 留着，换名不该让排查时认不出机器');
+  assert.equal(foreign.backup.name, FOREIGN_ZIP);
+  assert.equal(foreign.backup.present, true);
+  assert.ok(!r.orphans.includes(FOREIGN_ZIP), '被档案引用的备份不算无主');
+});
+
+test('机器改名：本机改自己的名字，别的机器记成本机别名', async () => {
+  const self = app.readConfig().machineId;
+  const r1 = await app.invoke('sync:renameMachine', { machineId: self, name: '  我的 台式机  ' });
+  assert.equal(r1.ok, true, JSON.stringify(r1));
+  assert.equal(r1.self, true);
+  assert.equal(app.readConfig().machineName, '我的 台式机', '进去之前先归一化');
+
+  const r2 = await app.invoke('sync:renameMachine', { machineId: 'foreign-machine', name: '老笔记本' });
+  assert.equal(r2.ok, true);
+  assert.equal(r2.self, false);
+  assert.deepEqual(app.readConfig().machineNames, { 'foreign-machine': '老笔记本' }, '别名只落本机配置');
+
+  const list = await app.invoke('sync:machines');
+  assert.equal(list.machines.find((m) => m.self).name, '我的 台式机');
+  assert.equal(list.machines.find((m) => m.machineId === 'foreign-machine').name, '老笔记本', '别名优先于侧车里的名字');
+  assert.equal(stub.readJson('/dav/host-foreign.json').machineName, '旧笔记本', '改名不写回云端侧车（那台机器下次备份会覆盖掉）');
+
+  assert.equal((await app.invoke('sync:renameMachine', { machineId: '../evil', name: 'x' })).ok, false);
+  assert.equal((await app.invoke('sync:renameMachine', { machineId: 'foreign-machine', name: '   ' })).ok, false);
+});
+
+test('机器档案：移出只删档案，删除则连它最近那份备份一起删', async () => {
+  // 移出：侧车没了，备份还在云端
+  const kept = await app.invoke('sync:forgetMachine', { file: 'host-foreign.json' });
+  assert.equal(kept.ok, true, JSON.stringify(kept));
+  assert.equal(kept.deletedBackup, '');
+  assert.ok(!stub.files.has('/dav/host-foreign.json'));
+  assert.ok(stub.files.has('/dav/' + FOREIGN_ZIP), '只是移出列表时不该动备份');
+
+  // 再挂一次，这次连备份一起删
+  stub.writeJson('/dav/host-foreign.json', foreignMeta());
+  const gone = await app.invoke('sync:forgetMachine', { file: 'host-foreign.json', deleteBackups: true });
+  assert.equal(gone.ok, true, JSON.stringify(gone));
+  assert.equal(gone.deletedBackup, FOREIGN_ZIP);
+  assert.ok(!stub.files.has('/dav/' + FOREIGN_ZIP));
+  assert.ok(!stub.files.has('/dav/host-foreign.json'));
+
+  // 本机自己的档案不给删：下一次备份会立刻写回来，要换身份该走认领或重置。
+  // 注意别用 hostMetaPath()——前面几次换标识会在云端留下旧档案，那台机器已经不是「本机」了
+  const selfFile = 'host-' + app.readConfig().machineId + '.json';
+  assert.ok(stub.files.has('/dav/' + selfFile), '本机档案确实在云端');
+  const self = await app.invoke('sync:forgetMachine', { file: selfFile });
+  assert.equal(self.ok, false);
+  assert.equal(self.reason, 'self');
+  assert.ok(stub.files.has('/dav/' + selfFile), '拒绝了就不该真的删掉');
+
+  // 路径穿越被挡在文件名校验上
+  assert.equal((await app.invoke('sync:forgetMachine', { file: '../latest.json' })).ok, false);
+});
+
+test('无主备份单独列出来，可逐个删掉', async () => {
+  const orphan = 'cc-skill-backup-20250601-000000.zip';
+  stub.writeJson('/dav/' + orphan, { fake: true });
+
+  const list = await app.invoke('sync:machines');
+  assert.ok(list.orphans.includes(orphan), '没被任何档案引用的备份要单独列出来');
+  assert.ok(!list.orphans.includes(stub.readJson(stub.metaPath()).name), '全局最新那条是有效引用，不算无主');
+
+  const del = await app.invoke('sync:deleteBackup', { name: orphan });
+  assert.equal(del.ok, true);
+  assert.ok(!stub.files.has('/dav/' + orphan));
+  assert.equal((await app.invoke('sync:deleteBackup', { name: '../../evil.zip' })).ok, false);
+});
+
+test('认领与重置本机标识', async () => {
+  const before = app.readConfig().machineId;
+  const adopted = await app.invoke('sync:adoptMachine', { machineId: 'foreign-machine' });
+  assert.equal(adopted.ok, true);
+  assert.equal(adopted.changed, true);
+  assert.equal(app.readConfig().machineId, 'foreign-machine');
+  // 已经就是这个标识时不算失败，只是没变
+  const again = await app.invoke('sync:adoptMachine', { machineId: 'foreign-machine' });
+  assert.equal(again.ok, true);
+  assert.equal(again.changed, false);
+  assert.equal((await app.invoke('sync:adoptMachine', { machineId: 'bad id!' })).ok, false);
+
+  const reset = await app.invoke('sync:resetMachine');
+  assert.equal(reset.ok, true);
+  assert.notEqual(reset.machineId, 'foreign-machine');
+  assert.notEqual(reset.machineId, before);
+  assert.equal(app.readConfig().machineId, reset.machineId);
 });

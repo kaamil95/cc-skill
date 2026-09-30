@@ -12,6 +12,9 @@ const {
   proxyCredentials,
   normalizeMarket,
   redactProxyUrl,
+  normalizeMachineName,
+  normalizeMachineNames,
+  parseConfigPayload,
 } = require('../../src/config');
 
 test('ui 缺失时给全套默认值', () => {
@@ -137,4 +140,62 @@ test('市场配置：索引地址必须是 http(s)，token 去空白', () => {
   assert.equal(normalizeMarket({ indexUrl: 'https://e.test/i.json' }).indexUrl, 'https://e.test/i.json');
   assert.equal(normalizeMarket({ indexUrl: 'file:///tmp/i.json' }).indexUrl, '');
   assert.equal(normalizeMarket({ token: '  ghp_x  ' }).token, 'ghp_x');
+});
+
+// ------------------------------ 机器名 / 别名 --------------------------------
+test('机器名去掉控制字符与换行，压掉连续空白，限长 40', () => {
+  assert.equal(normalizeMachineName(null), '');
+  assert.equal(normalizeMachineName(123), '');
+  assert.equal(normalizeMachineName('   '), '');
+  // 换行与制表符不能漏进界面/JSON；压成一个空格
+  assert.equal(normalizeMachineName('我的\n电脑\tA'), '我的 电脑 A');
+  assert.equal(normalizeMachineName('  我的   电脑  '), '我的 电脑');
+  assert.equal(normalizeMachineName('x'.repeat(60)).length, 40);
+  // 非 ASCII 一律保留：中文、emoji 都该原样留下
+  assert.equal(normalizeMachineName('🖥 开发机'), '🖥 开发机');
+  // 零宽字符不是控制字符，不该被当空白吃掉
+  assert.equal(normalizeMachineName('a​b'), 'a​b');
+});
+
+test('别名表丢掉非法 id 与空名字', () => {
+  assert.deepEqual(normalizeMachineNames(null), {});
+  assert.deepEqual(normalizeMachineNames('nope'), {});
+  assert.deepEqual(normalizeMachineNames({ good: ' A ', '../evil': 'B', 'has space': 'C', empty: '   ', bad: 42 }), { good: 'A' });
+});
+
+// ------------------------------ 配置文件 payload -----------------------------
+test('parseConfigPayload 拒绝非 JSON 与非本应用的配置文件', () => {
+  assert.equal(parseConfigPayload('{oops').reason, 'invalid-json');
+  assert.equal(parseConfigPayload(null).reason, 'not-config');
+  assert.equal(parseConfigPayload({ kind: 'market', config: { agents: [] } }).reason, 'not-config');
+  // kind 对了但 agents 不是数组，同样不算
+  assert.equal(parseConfigPayload({ kind: 'config', config: { agents: 'oops' } }).reason, 'not-config');
+});
+
+test('parseConfigPayload 给出确认框要用的摘要', () => {
+  const payload = {
+    kind: 'config',
+    exportedAt: '2026-09-30T00:00:00.000Z',
+    config: {
+      agents: [
+        { id: 'a', dirs: [] },
+        { id: 'b', dirs: [] },
+      ],
+      projects: [{ id: 'p', dir: '~/x' }, { nope: true }],
+      ui: { lang: 'en' },
+      webdav: { url: 'https://dav.test', password: 'p' },
+      machineName: ' 台式机 ',
+    },
+  };
+  const r = parseConfigPayload(JSON.stringify(payload));
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.summary, {
+    agents: 2,
+    projects: 1,
+    lang: 'en',
+    webdav: true,
+    password: true,
+    machineName: '台式机',
+    exportedAt: '2026-09-30T00:00:00.000Z',
+  });
 });

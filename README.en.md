@@ -45,6 +45,7 @@ Installing one SKILL for every agent means N divergent copies. CC Skill fixes th
 - 🗂 **Project scopes** — register project folders (e.g. `your-repo/.claude/skills`) and move SKILLs between global and project scopes; project installs always use copies (git-safe)
 - 📊 **Dashboard** — counts, per-agent / per-project distribution, recent activity
 - ☁️ **WebDAV backup & restore** — bring your own server (坚果云 / Nextcloud / Alist …), one-click snapshot of every physical SKILL, restore to the same directories on any machine
+- 🖥️ **Machine identity & profiles** — the cloud keeps a profile per machine that has backed up (rename / claim / remove / delete); after a fresh OS install, tick "this is this computer" in the restore dialog and project entries plus directories outside your home folder come back too. Configs can be exported to a file and imported from one
 - 🧾 **Operation log** — every action is recorded in-app and appended to `cc-skill.log` next to the app
 
 ## Getting started
@@ -81,13 +82,21 @@ Settings → WebDAV:
 
 Test connection → Backup now → Restore latest. The WebDAV protocol subset used is `PROPFIND / MKCOL / PUT / GET`, so any standards-compliant server works.
 
+### Several machines, one cloud folder
+
+Each machine has a random `machineId` in its `config.json`, and the cloud files profiles per id (`host-<id>.json`) so a restore can tell which backup is *yours*. A fresh OS install wipes that config, mints a new id, and the machine stops recognising its own backups — tick **"this is this computer"** in the restore dialog and the id is claimed back, together with the project entries and directories outside your home folder.
+
+The identity is deliberately **not** inferred from hardware: a clean reinstall regenerates the OS-level fingerprints anyway (registry `MachineGuid`, volume serial), and the hardware serials that survive it are the ones that collide between identically bought machines — and mistaking two machines for one fails silently, which is far worse than the reverse.
+
+Settings → Machine & config lets you rename machines (your own name travels with the backup; names you give other machines stay local), reset the id, and manage **cloud machine profiles** (rename / claim / remove / delete a profile together with its most recent backup). Configs can also be exported to JSON and imported back.
+
 ## FAQ
 
 **Is it Mac/Linux compatible?**
 The UI runs anywhere Electron runs, but linking relies on NTFS junctions. PRs for `symlink` support on unix are welcome.
 
 **Where is my data?**
-Config: `%APPDATA%\cc-skill\config.json`. Log: next to the exe (portable) or project root (dev). CC Skill never deletes anything permanently — removals go to the Recycle Bin.
+Windows portable: config and log both live next to the exe (copy the whole folder and you are done; an old `%APPDATA%` config is migrated on first launch). macOS: `~/Library/Application Support/CC Skill/`. Tests / multiple instances can point `CC_SKILL_DATA_DIR` elsewhere. CC Skill never deletes anything permanently — removals go to the Recycle Bin.
 
 **Is my WebDAV password safe?**
 It is stored in the local config file in plain text (same as most similar tools). Use an app-specific password and keep the config file private.

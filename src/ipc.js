@@ -8,7 +8,22 @@ const { IPC_CHANNEL_SET } = require('../ipc-channels');
 const { expand, tempDir } = require('./paths');
 const { resolveRef } = require('./nav');
 const { logLine } = require('./applog');
-const { DEFAULT_AGENTS, getConfig, saveConfig, normalizeConfigInPlace, normalizeUi, normalizeProxy, normalizeMarket, themeBg } = require('./config');
+const {
+  DEFAULT_AGENTS,
+  getConfig,
+  saveConfig,
+  normalizeConfigInPlace,
+  normalizeUi,
+  normalizeProxy,
+  normalizeMarket,
+  normalizeMachineName,
+  renameMachine,
+  machineDisplayName,
+  buildConfigPayload,
+  parseConfigPayload,
+  applyConfigPayload,
+  themeBg,
+} = require('./config');
 const { httpGet } = require('./net');
 const market = require('./market');
 const {
@@ -50,7 +65,7 @@ function registerIpcHandlers({ getWindow, appDir, userData, applyProxy }) {
   handle('scan', () => ({ ok: true, ...scanAll(), webdav: webdav.webdavCfg() }));
 
   handle('config:get', () => ({ agents: getConfig().agents }));
-  handle('config:set', ({ agents, projects, ui }) => {
+  handle('config:set', ({ agents, projects, ui, machineName }) => {
     // 各字段均可选：只传 ui 时（如「保存设置」）不会误伤 Agents / 项目
     const config = getConfig();
     if (agents !== undefined) {
@@ -63,9 +78,11 @@ function registerIpcHandlers({ getWindow, appDir, userData, applyProxy }) {
     }
     // 合并而非整体替换：只传 ui.lang 时不会把遮罩配置清掉
     if (ui) config.ui = normalizeUi({ ...config.ui, ...ui });
+    // 机器名允许清空（清空 = 回落 hostname），所以只按「传没传」判断，不看真假值
+    if (machineName !== undefined) config.machineName = normalizeMachineName(machineName);
     normalizeConfigInPlace();
     saveConfig();
-    return { ok: true, agents: config.agents, projects: config.projects, ui: config.ui };
+    return { ok: true, agents: config.agents, projects: config.projects, ui: config.ui, machineName: machineDisplayName() };
   });
   handle('config:reset', () => {
     const config = getConfig();
@@ -107,6 +124,44 @@ function registerIpcHandlers({ getWindow, appDir, userData, applyProxy }) {
     });
     return r.canceled ? null : r.filePaths[0];
   });
+
+  // ------------------------------ 配置文件 导出 / 导入 -------------------------
+  // 与「机器」有关：换台机器、留个档、多套配置之间来回换，都靠这一对。
+  // 解析与落地在 src/config.js（纯函数、可单测），这里只管弹窗与读写文件。
+  handle('config:exportFile', async ({ includePassword = false } = {}) => {
+    const stamp = new Date().toISOString().slice(0, 10);
+    // 机器名可能带 : / * 之类文件名非法字符，先洗干净再拼默认文件名
+    const slug = machineDisplayName().replace(/[\\/:*?"<>|]/g, '-');
+    const r = await dialog.showSaveDialog(getWindow(), {
+      defaultPath: `cc-skill-config-${slug}-${stamp}.json`,
+      filters: [{ name: 'JSON', extensions: ['json'] }],
+    });
+    if (r.canceled || !r.filePath) return { ok: false, canceled: true };
+    const payload = buildConfigPayload(!!includePassword);
+    fs.writeFileSync(r.filePath, JSON.stringify(payload, null, 2), 'utf8');
+    return { ok: true, path: r.filePath, includePassword: !!includePassword, agents: payload.config.agents.length, projects: payload.config.projects.length };
+  });
+
+  // 只读 + 解析 + 给摘要：确认之前绝不改本机任何配置
+  handle('config:importFile', async () => {
+    const r = await dialog.showOpenDialog(getWindow(), {
+      properties: ['openFile'],
+      filters: [{ name: 'JSON', extensions: ['json'] }],
+    });
+    if (r.canceled || !r.filePaths.length) return { ok: false, canceled: true };
+    let text;
+    try {
+      text = fs.readFileSync(r.filePaths[0], 'utf8');
+    } catch (err) {
+      return { ok: false, error: '读取文件失败：' + err.message };
+    }
+    const parsed = parseConfigPayload(text);
+    if (!parsed.ok) return parsed;
+    return { ok: true, path: r.filePaths[0], payload: parsed.payload, summary: parsed.summary };
+  });
+
+  // payload 经渲染层转了一手，这里重新校验（applyConfigPayload 内部会再做一次）
+  handle('config:importApply', ({ payload, includeWebdav = false } = {}) => applyConfigPayload(payload, { includeWebdav: !!includeWebdav }));
 
   // 导入前检查：文件夹直接定位技能根；ZIP 先解压到临时目录再定位
   handle('import:inspect', async ({ source }) => {
@@ -159,6 +214,11 @@ function registerIpcHandlers({ getWindow, appDir, userData, applyProxy }) {
     ui: normalizeUi(getConfig().ui),
     proxy: normalizeProxy(getConfig().proxy),
     market: normalizeMarket(getConfig().market),
+    // 机器身份：名字给界面显示，完整标识用于「机器档案」里认领/比对。它本来就存在本机
+    // config.json 里，下发给自己的渲染层不算泄露；进备份包才是要避免的（见 buildConfigPayload）
+    machineId: getConfig().machineId || '',
+    machineName: machineDisplayName(),
+    hostname: os.hostname(),
     // 渲染层据此调整自绘标题栏：macOS 用系统原生红绿灯，不再画一套自己的窗口按钮
     platform: process.platform,
   }));
@@ -172,7 +232,15 @@ function registerIpcHandlers({ getWindow, appDir, userData, applyProxy }) {
   handle('sync:test', () => webdav.testConnection());
   handle('sync:backup', () => webdav.backup());
   handle('sync:restoreInfo', () => webdav.restoreInfo());
-  handle('sync:restoreApply', ({ name, agentIds }) => webdav.restoreApply({ name, agentIds }));
+  handle('sync:restoreApply', ({ name, agentIds, adoptMachine }) => webdav.restoreApply({ name, agentIds, adoptMachine }));
+
+  // 机器档案：云端各机器的侧车、改名、认领、移出、重置本机标识
+  handle('sync:machines', () => webdav.listMachines());
+  handle('sync:renameMachine', ({ machineId, name }) => renameMachine(machineId, name));
+  handle('sync:adoptMachine', ({ machineId }) => webdav.adoptMachineId(machineId));
+  handle('sync:resetMachine', () => webdav.resetMachineId());
+  handle('sync:forgetMachine', ({ file, deleteBackups }) => webdav.forgetMachine({ file, deleteBackups }));
+  handle('sync:deleteBackup', ({ name }) => webdav.deleteBackup({ name }));
 
   // ------------------------------ 网络代理 ------------------------------------
   // 代理是本机配置（不进云备份）：手动模式可能带凭据，且 127.0.0.1 换台机器就不对了

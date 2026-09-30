@@ -8,7 +8,18 @@ const { tempDir, expand, isTilde, toTilde, removePath } = require('./paths');
 const { httpFetch } = require('./net');
 const { M } = require('./i18n');
 const { packZip, unpackZip } = require('./zip');
-const { getConfig, saveConfig, buildConfigPayload, normalizeConfigInPlace, normalizeUi, mergeAgentDirs } = require('./config');
+const {
+  getConfig,
+  saveConfig,
+  buildConfigPayload,
+  normalizeConfigInPlace,
+  normalizeUi,
+  mergeAgentDirs,
+  normalizeMachineName,
+  normalizeMachineNames,
+  machineDisplayName,
+  MACHINE_ID_RE,
+} = require('./config');
 const { scanAll } = require('./skills');
 
 function webdavCfg() {
@@ -162,6 +173,8 @@ function buildMeta({ name, manifest, targets, size, items }) {
   return {
     name,
     machineId: getConfig().machineId || '',
+    // 机器自己声明的名字（默认 hostname）。hostname 仍然如实记着——换名不该让排查时认不出机器
+    machineName: machineDisplayName(),
     hostname: manifest.hostname,
     created: manifest.created,
     entries: manifest.entries.length,
@@ -201,6 +214,7 @@ async function uploadSnapshot(items) {
       // 记录「打包这台机器」的身份，供恢复时判断能否连项目一起还原。
       // 注意它只是来源信息，不进 settings——那才是会被恢复覆盖的配置。
       machineId: getConfig().machineId || '',
+      machineName: machineDisplayName(),
       settings: buildConfigPayload(true).config,
       targets: [...targets.values()],
       entries: items.map((s) => ({ target: targets.get(s.parentDir).id, folder: s.folder })),
@@ -273,10 +287,7 @@ async function uploadSnapshot(items) {
     // 云端保留策略：总量最多 10 份，但每台机器最近那份永不删——各机器共用同一个远程目录，
     // 谁也不想自己唯一的备份被别人的频繁备份挤掉（那会让「本机备份」无声无息地退化成别人的备份）。
     try {
-      const list = await davRequest(cfg, 'PROPFIND', davUrl(cfg, ''), { headers: { Depth: '1' } });
-      const xml = await list.text();
-      const names = [...new Set(xml.match(/cc-skill-backup-[^<>]*?[.]zip/g) || [])].sort();
-      const sidecars = [...new Set(xml.match(/host-[^<>/]*?[.]json/g) || [])];
+      const { backups, sidecars } = await listRemote(cfg);
       const keep = new Set([name]);
       for (const f of sidecars) {
         try {
@@ -286,7 +297,7 @@ async function uploadSnapshot(items) {
           /* 读不到就只保住自己这份 */
         }
       }
-      for (const old of names.slice(0, Math.max(0, names.length - 10))) {
+      for (const old of backups.slice(0, Math.max(0, backups.length - 10))) {
         if (keep.has(old)) continue;
         try {
           await davRequest(cfg, 'DELETE', davUrl(cfg, old));
@@ -424,15 +435,21 @@ const normPath = (p) =>
 /**
  * 本机真正在用的 SKILL 目录（Agent 目录展开成绝对路径后的集合）。
  * 用来判断备份里那条绝对路径是不是「本机自己的目录」——见 restoreApply 里的三条路。
+ *
+ * fromBackup 传备份自己的 config.json 里的 Agent 目录（仅在「本机自己的备份」时才传）：
+ * 重装系统后本机配置是空的，自定义的 Agent 目录一个都不剩，可那些目录正是要恢复的目标。
+ * 少了这一项，认领之后还得再恢复一次才能把 SKILL 装回去。
  */
-function localSkillDirs() {
+function localSkillDirs(fromBackup) {
   const dirs = new Set();
-  for (const a of getConfig().agents || []) {
-    for (const d of (a && a.dirs) || []) {
+  const add = (list) => {
+    for (const d of list || []) {
       const abs = expand(d);
       if (abs) dirs.add(normPath(abs));
     }
-  }
+  };
+  for (const a of getConfig().agents || []) add(a && a.dirs);
+  for (const a of fromBackup || []) add(a && a.dirs);
   return dirs;
 }
 
@@ -469,11 +486,18 @@ function hostMetaFile() {
   return 'host-' + (id || 'unknown') + '.json';
 }
 
+// 云端目录实况：一次 PROPFIND 同时拿到备份名与侧车名（保留策略、机器档案、恢复都要用）
+async function listRemote(cfg) {
+  const xml = await (await davRequest(cfg, 'PROPFIND', davUrl(cfg, ''), { headers: { Depth: '1' } })).text();
+  return {
+    backups: [...new Set(xml.match(/cc-skill-backup-[^<>]*?[.]zip/g) || [])].sort(),
+    sidecars: [...new Set(xml.match(/host-[^<>/]*?[.]json/g) || [])],
+  };
+}
+
 // 列云端所有备份名（PROPFIND 列目录，按文件名时间戳排序）
 async function listBackupNames(cfg) {
-  const res = await davRequest(cfg, 'PROPFIND', davUrl(cfg, ''), { headers: { Depth: '1' } });
-  const xml = await res.text();
-  return [...new Set(xml.match(/cc-skill-backup-[^<>]*?[.]zip/g) || [])].sort();
+  return (await listRemote(cfg)).backups;
 }
 
 // 读一份侧车元数据。必须与目录实况对得上——上传中断、或该份备份已被保留策略清掉时一律作废降级
@@ -484,6 +508,8 @@ async function readMeta(cfg, file, names, expectMachineId) {
     if (expectMachineId && meta.machineId !== expectMachineId) return null;
     return {
       name: meta.name,
+      machineId: String(meta.machineId || ''),
+      machineName: normalizeMachineName(meta.machineName),
       hostname: String(meta.hostname || ''),
       uploadedAt: String(meta.created || ''),
       entries: Number(meta.entries) || 0,
@@ -497,18 +523,21 @@ async function readMeta(cfg, file, names, expectMachineId) {
 }
 
 // 恢复第一步：列目录 + 读侧车元数据（几百字节，秒级返回），用于确认弹窗——不下载整包。
-// 选哪一份：本机备份过就用本机那份，没备份过（新机器）才退回全局最新的一条。
+// 选哪一份：本机备份过就用本机那份，没备份过（新机器）就退回全局最新的一条。
 async function restoreInfo() {
   const cfg = webdavCfg();
   if (!cfg.url) return { ok: false, error: M('请先填写 WebDAV 配置', 'Please fill in the WebDAV config first') };
   const names = await listBackupNames(cfg);
   if (!names.length) return { ok: false, error: M('云端没有找到任何备份', 'No backups found on the cloud') };
   const base = { ok: true, remote: cfg.url + cfg.remotePath };
+  const mine = getConfig().machineId;
 
-  const mine = await readMeta(cfg, hostMetaFile(), names, getConfig().machineId);
-  if (mine) return { ...base, ...mine, source: 'local', detailed: true };
+  const local = await readMeta(cfg, hostMetaFile(), names, mine);
+  if (local) return { ...base, ...local, sameMachine: true, source: 'local', detailed: true };
   const latest = await readMeta(cfg, META_FILE, names);
-  if (latest) return { ...base, ...latest, source: 'latest', detailed: true };
+  // sameMachine 是启发式而不是凭证（machineId 就在备份包里写着，不构成认证），
+  // 它只用来决定「要不要提示用户认领」以及项目/绝对路径能不能直接用
+  if (latest) return { ...base, ...latest, sameMachine: !!latest.machineId && latest.machineId === mine, source: 'latest', detailed: true };
 
   // 旧版备份没有侧车文件：退化成只读 HEAD 响应头，且无法按 Agent 勾选（只能整包恢复）
   const newest = names[names.length - 1];
@@ -516,21 +545,167 @@ async function restoreInfo() {
   return {
     ...base,
     name: newest,
+    machineId: '',
+    machineName: '',
     hostname: '',
     uploadedAt: head.headers.get('last-modified') || '',
     entries: 0,
     size: Number(head.headers.get('content-length')) || 0,
     agents: [],
     projectCount: 0,
+    sameMachine: false,
     source: 'latest',
     detailed: false,
   };
 }
 
+// ------------------------------ 机器身份 -------------------------------------
+
+/**
+ * 认领：把本机标识改成备份里那个。
+ * 用来解决「重装系统后被当成新机器」——与其靠硬件指纹去猜（干净重装恰好会让 OS 级
+ * 指纹重新生成，而硬件序列号最容易撞号），不如让用户明确断言「那份备份就是我」。
+ * 认领之后 sameMachine 为真，项目与绝对路径目录一起回来；下一次备份还会重新写出
+ * host-<id>.json，云端那边也重新认上，是一次性的。
+ */
+function adoptMachineId(id) {
+  const clean = String(id || '').trim();
+  if (!MACHINE_ID_RE.test(clean)) return { ok: false, error: M('机器标识不合法', 'Invalid machine id') };
+  const changed = getConfig().machineId !== clean;
+  if (changed) {
+    getConfig().machineId = clean;
+    saveConfig();
+  }
+  return { ok: true, machineId: clean, changed };
+}
+
+/** 重置本机标识：认领错了、或要把机器交出去时的退路 */
+function resetMachineId() {
+  getConfig().machineId = require('crypto').randomUUID();
+  saveConfig();
+  return { ok: true, machineId: getConfig().machineId };
+}
+
+// 侧车文件名只允许这个形状：它会被拼进 URL，放行 ../ 就等于允许删云端别的文件
+const SIDECAR_FILE_RE = /^host-[A-Za-z0-9._-]+\.json$/;
+
+/**
+ * 云端机器档案：读所有 host-*.json 侧车。
+ *
+ * 一个必须说清楚的限制：备份 zip 的归属只能靠侧车里的 name 得知——zip 文件名不带机器
+ * 标识，zip 里的 manifest 要下载才读得到。所以「某台机器有多少份备份」无从得知，
+ * 这里只能给出它最近那一份（更早的快照本来就由保留策略收敛）。
+ */
+async function listMachines() {
+  const cfg = webdavCfg();
+  if (!cfg.url) return { ok: false, error: M('请先填写 WebDAV 配置', 'Please fill in the WebDAV config first') };
+  const { backups, sidecars } = await listRemote(cfg);
+  const mine = getConfig().machineId || '';
+  const aliases = normalizeMachineNames(getConfig().machineNames);
+  const machines = [];
+  const referenced = new Set();
+  for (const file of sidecars) {
+    let meta = null;
+    try {
+      meta = JSON.parse(await (await davRequest(cfg, 'GET', davUrl(cfg, file))).text());
+    } catch (_) {
+      /* 坏掉的侧车照样列出来——它正是最该被清掉的那种 */
+    }
+    const machineId = String((meta && meta.machineId) || '');
+    const self = !!machineId && machineId === mine;
+    const selfName = normalizeMachineName(meta && meta.machineName);
+    const hostname = String((meta && meta.hostname) || '');
+    const backupName = String((meta && meta.name) || '');
+    if (backupName && backups.includes(backupName)) referenced.add(backupName);
+    machines.push({
+      file,
+      machineId,
+      self,
+      alias: aliases[machineId] || '',
+      // 显示名优先级：本机名 > 本机起的别名 > 那台机器自己声明的名字 > hostname > 标识前 12 位
+      name: (self ? machineDisplayName() : '') || aliases[machineId] || selfName || hostname || (machineId || file).slice(0, 12),
+      selfName,
+      hostname,
+      backup: backupName
+        ? {
+            name: backupName,
+            created: String((meta && meta.created) || ''),
+            entries: Number((meta && meta.entries) || 0),
+            size: Number((meta && meta.size) || 0),
+            // 侧车指向的备份已经不在云端了（被保留策略清掉、或上传中断）
+            present: backups.includes(backupName),
+          }
+        : null,
+    });
+  }
+  machines.sort((a, b) => Number(b.self) - Number(a.self) || String(b.backup?.created || '').localeCompare(String(a.backup?.created || '')));
+  // 本机还没在这里备份过（新装、或档案被移出/清掉了）时补一行空的自己：
+  // 「云端机器档案」要能一眼看出「我在不在这儿」，也留个改名的入口
+  if (mine && !machines.some((m) => m.self)) {
+    machines.unshift({ file: '', machineId: mine, self: true, alias: '', name: machineDisplayName(), selfName: '', hostname: os.hostname(), backup: null });
+  }
+  // 全局最新那条也是有效引用（读不到本机侧车时的兜底路径就靠它），不算无主
+  let latestName = '';
+  try {
+    latestName = String(JSON.parse(await (await davRequest(cfg, 'GET', davUrl(cfg, META_FILE))).text()).name || '');
+  } catch (_) {
+    /* 没有 latest.json 就没有兜底引用 */
+  }
+  return {
+    ok: true,
+    remote: cfg.url + cfg.remotePath,
+    machines,
+    orphans: backups.filter((n) => !referenced.has(n) && n !== latestName),
+  };
+}
+
+/**
+ * 把一台机器从云端档案里移出；deleteBackups 为真时连它最近那份备份一起删。
+ * 本机自己的档案不给删——下一次备份会立刻把侧车写回来，要换身份请走认领或「重置标识」。
+ */
+async function forgetMachine({ file, deleteBackups = false } = {}) {
+  const cfg = webdavCfg();
+  if (!cfg.url) return { ok: false, error: M('请先填写 WebDAV 配置', 'Please fill in the WebDAV config first') };
+  if (!SIDECAR_FILE_RE.test(String(file || ''))) return { ok: false, error: M('机器档案名不合法', 'Invalid machine profile name') };
+  let meta = null;
+  try {
+    meta = JSON.parse(await (await davRequest(cfg, 'GET', davUrl(cfg, file))).text());
+  } catch (_) {
+    /* 读不到也允许删：坏掉的侧车正是最该清掉的 */
+  }
+  if (meta && meta.machineId && meta.machineId === getConfig().machineId) {
+    return {
+      ok: false,
+      reason: 'self',
+      error: M('这是本机的档案，要换身份请用「重置本机标识」', 'This profile is this machine — use “Reset machine id” instead'),
+    };
+  }
+  let deletedBackup = '';
+  if (deleteBackups && meta && BACKUP_NAME_RE.test(String(meta.name || ''))) {
+    try {
+      await davRequest(cfg, 'DELETE', davUrl(cfg, String(meta.name)));
+      deletedBackup = String(meta.name);
+    } catch (_) {
+      /* 备份删不掉（可能已经不在了）不阻塞档案清理 */
+    }
+  }
+  await davRequest(cfg, 'DELETE', davUrl(cfg, file));
+  return { ok: true, deletedBackup };
+}
+
+/** 删掉一份无主备份（没被任何机器档案引用） */
+async function deleteBackup({ name } = {}) {
+  const cfg = webdavCfg();
+  if (!cfg.url) return { ok: false, error: M('请先填写 WebDAV 配置', 'Please fill in the WebDAV config first') };
+  if (!BACKUP_NAME_RE.test(String(name || ''))) return { ok: false, error: M('备份名不合法', 'Invalid backup name') };
+  await davRequest(cfg, 'DELETE', davUrl(cfg, String(name)));
+  return { ok: true, name };
+}
+
 // 恢复第二步（点击「确认恢复」后才会调用）：下载 → 解压 → 校验 manifest → 覆盖还原 SKILL 与配置
 // 下载或校验失败时不会落地任何文件，本地数据不受影响。
 // 只还原全局 SKILL：项目级 SKILL 随项目仓库走，在这里落地只会写进一个没人读的目录。
-async function restoreApply({ name, agentIds }) {
+async function restoreApply({ name, agentIds, adoptMachine = false }) {
   const cfg = webdavCfg();
   if (!cfg.url) return { ok: false, error: M('请先填写 WebDAV 配置', 'Please fill in the WebDAV config first') };
   if (!BACKUP_NAME_RE.test(String(name || ''))) {
@@ -538,6 +713,9 @@ async function restoreApply({ name, agentIds }) {
   }
   if (agentIds !== undefined && agentIds !== null && !Array.isArray(agentIds)) {
     return { ok: false, error: M('恢复范围参数不合法', 'Invalid restore scope') };
+  }
+  if (adoptMachine !== undefined && adoptMachine !== null && typeof adoptMachine !== 'boolean') {
+    return { ok: false, error: M('认领参数不合法', 'Invalid adopt flag') };
   }
   // 显式传空数组 = 一个 Agent 都不选：整次恢复都是空操作，连配置也不该动。
   // 不这么挡的话，技能没恢复、本机的项目与 WebDAV 配置却已被备份里的覆盖了。
@@ -581,6 +759,24 @@ async function restoreApply({ name, agentIds }) {
       return { ok: false, error: M('manifest 校验失败，不是 CC Skill 的备份', 'Manifest validation failed — not a CC Skill backup') };
     }
 
+    // 认领：用户确认「这份备份就是我（比如刚重装过系统）」，于是把本机标识改成备份里那个。
+    // 必须在算 sameMachine / localDirs 之前完成——项目列表与「本机在用的绝对路径目录」
+    // 都靠它才能一起还原。此刻还没往磁盘上写任何东西，校验不过可以直接退出。
+    if (adoptMachine) {
+      const adopted = adoptMachineId(manifest.machineId);
+      if (!adopted.ok) return adopted;
+    }
+
+    // 备份里的 config.json 一次读出来，两处要用：算 localDirs（本机自己的备份声明的目录
+    // 也算本机的）与最后合并设置。缺失或损坏时按空对象处理，不该拖累 SKILL 恢复。
+    let backupConfig = {};
+    try {
+      const parsed = JSON.parse(fs.readFileSync(path.join(tmpRoot, 'config.json'), 'utf8'));
+      if (parsed && typeof parsed === 'object') backupConfig = parsed;
+    } catch (_) {
+      /* 旧版备份可能不带 config.json */
+    }
+
     const targetById = new Map(manifest.targets.map((t) => [t.id, t]));
     let restored = 0;
     let skippedProjects = 0;
@@ -590,10 +786,10 @@ async function restoreApply({ name, agentIds }) {
     const relocated = new Map(); // 旧绝对路径 -> 还原后的 ~ 路径
     const dests = new Set();
     const legacyRemap = makeLegacyRemap(manifest);
-    const localDirs = localSkillDirs();
     // 项目列表只在「同一台机器」的备份上还原：项目路径是机器相关的，换台电脑恢复过来的一串路径
     // 基本全是错的，还得用户手工清一遍。机器身份取自 manifest（旧版备份没有这一项 → 不还原）。
     const sameMachine = !!manifest.machineId && manifest.machineId === getConfig().machineId;
+    const localDirs = localSkillDirs(sameMachine && Array.isArray(backupConfig.agents) ? backupConfig.agents : null);
     for (const e of manifest.entries) {
       const t = targetById.get(e.target);
       if (!t) continue;
@@ -643,14 +839,14 @@ async function restoreApply({ name, agentIds }) {
       dests.add(destDir);
       restored++;
     }
-    // 恢复设置文件（ Agents / 项目 / WebDAV / 界面语言 ）
+    // 恢复设置文件（ Agents / 项目 / WebDAV / 界面语言 / 机器名 ）。
+    // 上面已经把它读进来了（算 localDirs 时要用），这里直接接着用
     let appliedConfig = false;
     let projectConfigSkipped = 0;
-    const cfgFile = path.join(tmpRoot, 'config.json');
-    if (fs.existsSync(cfgFile)) {
+    if (Object.keys(backupConfig).length) {
       try {
         const config = getConfig();
-        const c = JSON.parse(fs.readFileSync(cfgFile, 'utf8'));
+        const c = backupConfig;
         // Agent 目录按勾选合并（取并集），不整体替换——本机自定义过的目录不该被静默抹掉
         if (Array.isArray(c.agents)) config.agents = mergeAgentDirs(config.agents, c.agents, agentIds);
         if (Array.isArray(c.projects)) {
@@ -660,6 +856,12 @@ async function restoreApply({ name, agentIds }) {
         // 合并而非替换：旧备份的 config.json 里只有 lang，别把本地新加的界面偏好清掉
         if (c.ui) config.ui = normalizeUi({ ...config.ui, ...c.ui });
         if (c.webdav) config.webdav = { ...(config.webdav || {}), ...c.webdav, lastBackupAt: Date.now(), lastBackupHash: '' };
+        // 机器名与别名只跟「本机自己的备份」走：恢复别人的备份不该把本机改名。
+        // 认领之后 sameMachine 为真，这条自然生效。名字已起过就不覆盖（非破坏性）
+        if (sameMachine) {
+          if (!normalizeMachineName(config.machineName)) config.machineName = normalizeMachineName(c.machineName);
+          config.machineNames = { ...normalizeMachineNames(c.machineNames), ...normalizeMachineNames(config.machineNames) };
+        }
         normalizeConfigInPlace();
         saveConfig();
         appliedConfig = true;
@@ -673,7 +875,9 @@ async function restoreApply({ name, agentIds }) {
       restored,
       dests: [...dests],
       appliedConfig,
+      adoptedMachine: !!adoptMachine && sameMachine,
       projectConfigSkipped,
+      sameMachine,
       skippedProjects,
       skippedAgents,
       skippedInvalid,
@@ -695,6 +899,11 @@ module.exports = {
   startAutoBackup,
   restoreInfo,
   restoreApply,
+  listMachines,
+  forgetMachine,
+  deleteBackup,
+  adoptMachineId,
+  resetMachineId,
   snapshotHash,
   uploadSnapshot,
   BACKUP_NAME_RE,
