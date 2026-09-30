@@ -92,6 +92,8 @@ Settings → Machine & config lets you rename machines (your own name travels wi
 
 **The restore range is decided by this machine, not by the archive.** Files are only written into directories your own config uses, or into the extra ones you confirm from a list during the restore; what the archive declares about itself does not count. Paths containing `..`, or that are not absolute, are dropped as malformed.
 
+**Archives do not contain your WebDAV password** (address, username and remote directory do travel with them): the archive sits in the cloud and may be shared around, while restoring already requires reaching that cloud — so the credentials are in your local config anyway. Restoring a backup whose address or username differs from yours clears the local password and asks you to retype it; if the address is unchanged, nothing is cleared.
+
 ## FAQ
 
 **Is it Mac/Linux compatible?**

@@ -364,8 +364,7 @@ function applyConfigPayload(payload, { includeWebdav = false } = {}) {
     const next = { ...local, ...c.webdav };
     // 换到别的服务器（地址或账号变了）时不能把本机密码带过去：文件可能就是别人给的，
     // 而密码会以 Basic 头发往文件里写的那个地址。文件没带密码就清空，让用户重填。
-    const moved = String(c.webdav.url || '') !== String(local.url || '') || String(c.webdav.username || '') !== String(local.username || '');
-    if (moved && !c.webdav.password && local.password) {
+    if (webdavServerChanged(local, c.webdav) && !c.webdav.password && local.password) {
       next.password = '';
       passwordCleared = true;
     }
@@ -384,6 +383,21 @@ function applyConfigPayload(payload, { includeWebdav = false } = {}) {
     webdavApplied: !!(includeWebdav && c.webdav),
     passwordCleared,
   };
+}
+
+/**
+ * 备份 / 导入来的 WebDAV 设置是不是换了一台服务器（地址或账号变了）。
+ * 用来决定「本机密码要不要清掉」：换服务器还把密码带过去，等于把它送给新地址。
+ * 比地址前先去掉结尾斜杠 —— `https://dav.test/` 与 `https://dav.test` 是同一个地方，
+ * 不该因为差一个斜杠就让用户重填密码。
+ */
+function webdavServerChanged(local, incoming) {
+  const norm = (u) =>
+    String(u || '')
+      .trim()
+      .replace(/\/+$/, '');
+  if (norm(incoming && incoming.url) !== norm(local && local.url)) return true;
+  return String((incoming && incoming.username) || '') !== String((local && local.username) || '');
 }
 
 /**
@@ -438,4 +452,5 @@ module.exports = {
   buildConfigPayload,
   parseConfigPayload,
   applyConfigPayload,
+  webdavServerChanged,
 };

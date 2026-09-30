@@ -547,6 +547,8 @@
     '文件里带了 WebDAV 设置（不含密码），会一并导入，地址不变时密码保留本机的。':
       'The file carries WebDAV settings without a password — they are imported; your password is kept as long as the address does not change.',
     '配置已导入 ✓（WebDAV 密码已清空，请重新填写）': 'Config imported ✓ (the WebDAV password was cleared — please re-enter it)',
+    'WebDAV 地址来自备份，与本机密码不是一对，密码已清空 —— 请在设置里重新填写':
+      'The WebDAV address came from the backup and does not go with your password, which was cleared — please re-enter it in Settings',
     '把这台机器从档案列表里移出，并从云端永久删除它的备份：\n{n}\n这个操作不可撤销。':
       'Remove this machine from the profile list and permanently delete its backup from the cloud:\n{n}\nThis cannot be undone.',
     '· 还有 {n} 个目录…': '· …and {n} more directories',

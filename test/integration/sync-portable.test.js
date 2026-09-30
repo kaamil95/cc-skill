@@ -91,6 +91,10 @@ test('备份包存的是 ~ 形式路径，不含上传机器的用户目录', as
   assert.equal(manifest.settings.machineName, undefined, 'settings 里不该有机器名');
   assert.equal(manifest.settings.machineNames, undefined, '别名不该随备份上云');
   assert.equal(manifest.machineName, '我的台式机', '名字要在顶层，别的机器读侧车才看得到');
+  // 密码不进包：包躺在云端，而恢复必须能连上云端，凭据本来就在本机配置里
+  assert.equal(packedConfig.webdav.password, undefined, 'config.json 里不该有 WebDAV 密码');
+  assert.equal(manifest.settings.webdav.password, undefined, 'settings 里也不该有');
+  assert.equal(packedConfig.webdav.url, stub.url, '地址等其它设置照旧随包走');
 
   const dests = manifest.targets.map((t) => t.destDir);
   for (const expected of ['~/.claude/skills', '~/.codex/skills']) {

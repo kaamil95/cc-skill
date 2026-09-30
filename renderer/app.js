@@ -1998,6 +1998,8 @@ $('#btn-restore-confirm').addEventListener('click', async () => {
     if (r.skippedAgents) toast(tf('未恢复 {n} 个未勾选 Agent 的 SKILL', { n: r.skippedAgents }), '');
     if (r.skippedInvalid) toast(tf('跳过 {n} 个路径非法的条目', { n: r.skippedInvalid }), 'err');
     if (r.appliedConfig) toast(t('配置也已恢复 ✓'), 'ok');
+    // 备份里的地址与本机不同、包又不带密码 → 本机密码已清空，得让用户知道要重填
+    if (r.passwordCleared) toast(t('WebDAV 地址来自备份，与本机密码不是一对，密码已清空 —— 请在设置里重新填写'), '');
     closeModal('modal-restore');
     // 备份里带了设置，界面偏好（含遮罩）要跟着刷新
     if (r.appliedConfig) {

@@ -19,6 +19,7 @@ const {
   normalizeMachineNames,
   machineDisplayName,
   MACHINE_ID_RE,
+  webdavServerChanged,
 } = require('./config');
 const { scanAll } = require('./skills');
 
@@ -206,9 +207,12 @@ async function uploadSnapshot(items) {
       }
       targets.get(s.parentDir).count++;
     }
-    // 随包上传的设置。机器名走 manifest 顶层、别名（本机给别的机器起的名字）压根不上云 ——
-    // 它是本机自己的显示信息，随备份跑到别的机器上没有意义
-    const settings = buildConfigPayload(true).config;
+    // 随包上传的设置。三样刻意不进包：
+    //   machineName / machineNames —— 机器名走 manifest 顶层，别名是本机自己的显示信息
+    //   webdav.password            —— 包会躺在云端（还可能被分享出去），而恢复必须能连上云端，
+    //                                 说明凭据本来就在本机配置里；把密码塞进包只是白白多一份泄露面
+    //   用 buildConfigPayload(false)：它本来就删掉密码，导出文件那条路要带密码是用户显式勾的
+    const settings = buildConfigPayload(false).config;
     delete settings.machineName;
     delete settings.machineNames;
     const manifest = {
@@ -231,7 +235,10 @@ async function uploadSnapshot(items) {
       count++;
     }
     fs.writeFileSync(path.join(tmpRoot, 'manifest.json'), JSON.stringify(manifest, null, 2), 'utf8');
-    // 设置文件随备份一同上传（ Agents / 项目 / WebDAV / 界面语言 ）
+    // 设置文件随备份一同上传（ Agents / 项目 / WebDAV / 界面语言 ）。
+    // webdav 里剥掉密码，理由见上面 settings 那段
+    const packedWebdav = { ...webdavCfg() };
+    delete packedWebdav.password;
     fs.writeFileSync(
       path.join(tmpRoot, 'config.json'),
       JSON.stringify(
@@ -239,7 +246,7 @@ async function uploadSnapshot(items) {
           ui: getConfig().ui || { lang: 'auto' },
           agents: getConfig().agents,
           projects: getConfig().projects,
-          webdav: webdavCfg(),
+          webdav: packedWebdav,
           exportedAt: manifest.created,
         },
         null,
@@ -769,6 +776,7 @@ async function restoreApply({ name, agentIds, adoptMachine = false, allowExterna
       dests: [],
       appliedConfig: false,
       projectConfigSkipped: 0,
+      passwordCleared: false,
       skippedProjects: 0,
       skippedAgents: 0,
       skippedInvalid: 0,
@@ -906,6 +914,7 @@ async function restoreApply({ name, agentIds, adoptMachine = false, allowExterna
     // 上面已经把它读进来了（算 localDirs 时要用），这里直接接着用
     let appliedConfig = false;
     let projectConfigSkipped = 0;
+    let passwordCleared = false;
     if (Object.keys(backupConfig).length) {
       try {
         const config = getConfig();
@@ -921,7 +930,17 @@ async function restoreApply({ name, agentIds, adoptMachine = false, allowExterna
         }
         // 合并而非替换：旧备份的 config.json 里只有 lang，别把本地新加的界面偏好清掉
         if (c.ui) config.ui = normalizeUi({ ...config.ui, ...c.ui });
-        if (c.webdav) config.webdav = { ...(config.webdav || {}), ...c.webdav, lastBackupAt: Date.now(), lastBackupHash: '' };
+        if (c.webdav) {
+          const local = config.webdav || {};
+          const next = { ...local, ...c.webdav, lastBackupAt: Date.now(), lastBackupHash: '' };
+          // 包里的地址或账号换成了别的（恢复的是别台机器的备份）→ 本机密码不能跟着走：
+          // 那等于把密码送给备份里写的那个地址。包本身不带密码（见 uploadSnapshot）
+          if (webdavServerChanged(local, c.webdav) && !c.webdav.password && local.password) {
+            next.password = '';
+            passwordCleared = true;
+          }
+          config.webdav = next;
+        }
         // 机器名只跟「本机自己的备份」走：恢复别人的备份不该把本机改名。名字取自 manifest 顶层
         // （包内 config.json 里没有它），本机已经起过名就不覆盖 —— 非破坏性
         if (sameMachine && !normalizeMachineName(config.machineName)) {
@@ -941,6 +960,8 @@ async function restoreApply({ name, agentIds, adoptMachine = false, allowExterna
       dests: [...dests],
       appliedConfig,
       adoptedMachine: claimedId,
+      // 备份里的 WebDAV 地址与本机不同、包又不带密码时，本机密码会被清空（要重填）
+      passwordCleared,
       projectConfigSkipped,
       sameMachine,
       skippedProjects,

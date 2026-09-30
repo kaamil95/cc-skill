@@ -432,6 +432,52 @@ test('旧版备份（认领时包里没有 machineId）不该把整次恢复拒�
   stub.remove('/dav/' + zipName);
 });
 
+test('恢复：备份里的 WebDAV 地址与本机不同时清空本机密码，相同时留着', async () => {
+  // 备份包躺在云端（还可能被分享出去），里面不该有密码；而恢复必须能连上云端，
+  // 说明凭据本来就在本机配置里 —— 所以剥掉它不损失什么，却少一份泄露面
+  const zipName = 'cc-skill-backup-20260205-050505.zip';
+  const payload = path.join(tmpDir('cc-skill-wd-'), 'payload');
+  fs.mkdirSync(path.join(payload, 'data', 't0', 'w'), { recursive: true });
+  fs.writeFileSync(path.join(payload, 'data', 't0', 'w', 'SKILL.md'), '---\nname: w\ndescription: x\n---\n\n正文\n', 'utf8');
+  fs.writeFileSync(
+    path.join(payload, 'manifest.json'),
+    JSON.stringify({
+      app: 'CC Skill',
+      manifestVersion: 1,
+      created: new Date().toISOString(),
+      hostname: 'x',
+      machineId: app.readConfig().machineId,
+      settings: { agents: [] },
+      targets: [{ id: 't0', destDir: '~/.claude/skills', kind: 'global', projectId: null, agentIds: ['claude-code'], count: 1 }],
+      entries: [{ target: 't0', folder: 'w' }],
+    }),
+    'utf8'
+  );
+  const putConfig = (webdav) => {
+    fs.writeFileSync(path.join(payload, 'config.json'), JSON.stringify({ agents: [], projects: [], ui: {}, webdav }), 'utf8');
+    stub.files.set('/dav/' + zipName, fs.readFileSync(zipDir(payload, path.join(path.dirname(payload), 'wd.zip'))));
+  };
+
+  // ① 备份里的地址是别人的 → 本机密码必须清掉（否则下一次备份把它发到那个地址去）
+  await app.invoke('sync:setConfig', { webdav: makeWebdavConfig(stub.url) });
+  assert.equal(app.readConfig().webdav.password, 'p', '前提：本机有密码');
+  putConfig({ url: 'https://someone-else.test/dav', username: 'attacker', remotePath: 'dav' });
+  const moved = await app.invoke('sync:restoreApply', { name: zipName });
+  assert.equal(moved.ok, true, JSON.stringify(moved));
+  assert.equal(moved.passwordCleared, true, '要告诉界面密码被清空了');
+  assert.equal(app.readConfig().webdav.url, 'https://someone-else.test/dav');
+  assert.equal(app.readConfig().webdav.password, '', '密码不能跟着备份里的地址走');
+
+  // ② 地址与账号都一样（本机自己的备份就是这样，只差结尾斜杠）→ 密码留着，不该逼用户重填
+  await app.invoke('sync:setConfig', { webdav: makeWebdavConfig(stub.url) });
+  putConfig({ url: stub.url + '/', username: 'u', remotePath: 'dav' });
+  const same = await app.invoke('sync:restoreApply', { name: zipName });
+  assert.equal(same.ok, true, JSON.stringify(same));
+  assert.equal(same.passwordCleared, false, '同一个服务器不该清密码');
+  assert.equal(app.readConfig().webdav.password, 'p');
+  stub.remove('/dav/' + zipName);
+});
+
 test('备份包损坏时失败且不落地任何文件、不残留临时目录', async () => {
   const info = await app.invoke('sync:restoreInfo');
   const tempsBefore = listRestoreTemps();
