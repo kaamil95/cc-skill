@@ -15,7 +15,9 @@ let app;
 let stub;
 let root;
 let agentDir;
+let outsideDir;
 let savedHomeEnv;
+const extraDirs = []; // 用例内临时建的目录，统一在 after 里清掉
 
 // 应用自己的临时目录已被 harness 隔离到 workDir 下，这里看到的就是它产生的全部临时文件
 const listRestoreTemps = () => fs.readdirSync(app.tempDir).filter((n) => n.startsWith('cc-skill-restore-'));
@@ -32,6 +34,8 @@ before(async () => {
   root = tmpDir('cc-skill-sync-');
   setHome(root);
   agentDir = path.join(root, '.claude', 'skills');
+  // HOME 之外的目录：备份存不下 ~ 形式，只能存绝对路径
+  outsideDir = tmpDir('cc-skill-outside-');
   fs.mkdirSync(agentDir, { recursive: true });
   stub = new WebdavStub();
   const url = await stub.start();
@@ -41,7 +45,7 @@ before(async () => {
 after(() => {
   app.cleanup();
   stub.stop();
-  fs.rmSync(root, { recursive: true, force: true });
+  for (const d of [root, outsideDir, ...extraDirs]) fs.rmSync(d, { recursive: true, force: true });
   restoreHomeEnv(savedHomeEnv);
 });
 
@@ -157,6 +161,55 @@ test('确认后：下载 → 解压 → 覆盖还原，且临时目录不残留'
   assert.ok(fs.existsSync(path.join(agentDir, 'alpha', 'ref', 'a.md')), '子目录也要还原');
   assert.ok(fs.existsSync(path.join(agentDir, 'beta', 'SKILL.md')));
   assertNoNewTemps(tempsBefore);
+});
+
+test('HOME 之外的 Agent 目录：同机恢复照样还原', async () => {
+  // 自定义的 Agent 目录常在 home 之外，备份存不下 ~ 形式，只能存绝对路径。
+  // 恢复时不能把这类绝对路径一律当成「别的机器的」跳过 —— 它就在本机、配置里也写着，
+  // 照原样写回才对。以前这里会 restored 少一个、并在界面上报「无法映射到本机目录」。
+  await app.invoke('config:set', { agents: [{ id: 'claude-code', name: 'Claude Code', dirs: [agentDir, outsideDir] }] });
+  writeSkill(outsideDir, 'outside');
+
+  const up = await app.invoke('sync:backup');
+  assert.equal(up.ok, true, JSON.stringify(up));
+
+  const info = await app.invoke('sync:restoreInfo');
+  fs.rmSync(agentDir, { recursive: true, force: true });
+  fs.rmSync(outsideDir, { recursive: true, force: true });
+
+  const r = await app.invoke('sync:restoreApply', { name: info.name });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(r.restored, 3, 'HOME 之外的也要算上');
+  assert.deepEqual(r.skippedExternal, [], '本机在用的目录不该被当成无法映射的路径');
+  assert.ok(fs.existsSync(path.join(outsideDir, 'outside', 'SKILL.md')), 'HOME 之外的目录也要还原');
+  assert.ok(fs.existsSync(path.join(agentDir, 'alpha', 'SKILL.md')), 'HOME 之下的照旧');
+});
+
+test('本机已经不再用的绝对路径目录，仍然跳过（不造幽灵目录）', async () => {
+  // 上面那条规则的另一面：绝对路径只有「本机自己的、且现在还在配置里」才认。
+  // 目录已经从配置里摘掉之后，照着备份包写回去只会得到一棵没人读的目录树 ——
+  // 那正是换机恢复要避免的事，同机也一样。
+  const stale = tmpDir('cc-skill-stale-');
+  extraDirs.push(stale);
+  writeSkill(stale, 'stale-skill');
+  const dirs = [agentDir, outsideDir, stale];
+  await app.invoke('config:set', { agents: [{ id: 'claude-code', name: 'Claude Code', dirs }] });
+  assert.equal((await app.invoke('sync:backup')).ok, true);
+
+  // 备份完就把这个目录从配置里摘掉（outsideDir 留着，它才是本机在用的那个）
+  await app.invoke('config:set', { agents: [{ id: 'claude-code', name: 'Claude Code', dirs: [agentDir, outsideDir] }] });
+  const info = await app.invoke('sync:restoreInfo');
+  fs.rmSync(stale, { recursive: true, force: true });
+
+  const r = await app.invoke('sync:restoreApply', { name: info.name });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.deepEqual(
+    r.skippedExternal.map((x) => x.dir),
+    [stale],
+    '只该跳过本机不再使用的那个目录'
+  );
+  assert.ok(!fs.existsSync(path.join(stale, 'stale-skill')), '不该照着备份包重建目录');
+  assert.ok(fs.existsSync(path.join(outsideDir, 'outside', 'SKILL.md')), '本机在用的照旧还原');
 });
 
 test('备份包损坏时失败且不落地任何文件、不残留临时目录', async () => {

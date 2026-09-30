@@ -414,6 +414,28 @@ const BACKUP_NAME_RE = /^cc-skill-backup-[A-Za-z0-9._-]+\.zip$/;
 // 这些值会被 path.join 进真实路径，放行就等于允许备份包在目标目录之外增删文件。
 const isSafeSegment = (s) => typeof s === 'string' && s !== '.' && s !== '..' && /^[^\\/]+$/.test(s);
 
+// 路径比对用的归一化：统一分隔符、去掉结尾斜杠、转小写（Windows 上大小写不敏感）
+const normPath = (p) =>
+  String(p || '')
+    .replace(/\\/g, '/')
+    .replace(/\/+$/, '')
+    .toLowerCase();
+
+/**
+ * 本机真正在用的 SKILL 目录（Agent 目录展开成绝对路径后的集合）。
+ * 用来判断备份里那条绝对路径是不是「本机自己的目录」——见 restoreApply 里的三条路。
+ */
+function localSkillDirs() {
+  const dirs = new Set();
+  for (const a of getConfig().agents || []) {
+    for (const d of (a && a.dirs) || []) {
+      const abs = expand(d);
+      if (abs) dirs.add(normPath(abs));
+    }
+  }
+  return dirs;
+}
+
 /**
  * 旧版备份把上传机器的绝对路径原样写进了 manifest（那时还没有 ~ 归一化）。
  * 但同一份 manifest 的 settings 里，Agent 目录是 ~ 形式的——据此可以把旧路径还原：
@@ -426,15 +448,12 @@ function makeLegacyRemap(manifest) {
     for (const d of (a && a.dirs) || []) if (isTilde(d)) tildes.push(d);
   }
   return (absPath) => {
-    const target = String(absPath || '')
-      .replace(/\\/g, '/')
-      .replace(/\/+$/, '')
-      .toLowerCase();
+    const target = normPath(absPath);
     if (!target) return null;
     // 取最长的那个匹配：目录名有包含关系时才不会挑错
     let best = null;
     for (const t of tildes) {
-      const rel = t.slice(2).replace(/\/+$/, '').toLowerCase();
+      const rel = normPath(t.slice(2));
       if (rel && target.endsWith('/' + rel) && (!best || t.length > best.length)) best = t;
     }
     return best;
@@ -571,6 +590,10 @@ async function restoreApply({ name, agentIds }) {
     const relocated = new Map(); // 旧绝对路径 -> 还原后的 ~ 路径
     const dests = new Set();
     const legacyRemap = makeLegacyRemap(manifest);
+    const localDirs = localSkillDirs();
+    // 项目列表只在「同一台机器」的备份上还原：项目路径是机器相关的，换台电脑恢复过来的一串路径
+    // 基本全是错的，还得用户手工清一遍。机器身份取自 manifest（旧版备份没有这一项 → 不还原）。
+    const sameMachine = !!manifest.machineId && manifest.machineId === getConfig().machineId;
     for (const e of manifest.entries) {
       const t = targetById.get(e.target);
       if (!t) continue;
@@ -590,14 +613,27 @@ async function restoreApply({ name, agentIds }) {
       }
       const src = path.join(tmpRoot, 'data', t.id, e.folder);
       if (!fs.existsSync(src)) continue;
-      // ~ 形式直接用；旧版备份的绝对路径则按 manifest 里声明的 Agent 目录还原成本机路径。
-      // 两条路都走不通就跳过——照着原机器的绝对路径创建，只会得到一棵没人读的幽灵目录树。
-      const declared = isTilde(t.destDir) ? t.destDir : legacyRemap(t.destDir);
+      // 落到哪儿，三条路：
+      //   1. ~ 形式（现在的备份都这样）——直接用，按本机 home 展开
+      //   2. 绝对路径，且确实是「本机自己的目录」——自定义的 Agent 目录常在 home 之外，备份
+      //      存不下 ~ 形式，只能存绝对路径；同机恢复时这条路径本来就对，照原样写回
+      //   3. 其余绝对路径（旧版备份、换机后的残留）——按 manifest 里声明的 ~ 目录重新映射
+      // 三条都走不通就跳过——照着备份包里的绝对路径硬写，只会得到一棵没人读的幽灵目录树。
+      //
+      // 第 2 条要同时满足两个条件，缺一不可：
+      //   - 是本机的备份（machineId 对得上）。换机恢复时那些绝对路径指的是原机器的位置，
+      //     在本机照着建就是幽灵目录树
+      //   - 该目录现在仍在配置里。恢复会把备份里的 Agent 目录并进本机配置，所以「配置里有」
+      //     单独并不足以说明是本机的——上一轮换机恢复并进来的外来绝对路径，配置里也有
+      let declared = null;
+      if (isTilde(t.destDir)) declared = t.destDir;
+      else if (sameMachine && localDirs.has(normPath(t.destDir))) declared = t.destDir;
+      else declared = legacyRemap(t.destDir);
       if (!declared) {
         skippedExternal.set(t.destDir, (skippedExternal.get(t.destDir) || 0) + 1);
         continue;
       }
-      if (!isTilde(t.destDir)) relocated.set(t.destDir, declared);
+      if (!isTilde(t.destDir) && declared !== t.destDir) relocated.set(t.destDir, declared);
       const destDir = expand(declared);
       const dest = path.join(destDir, e.folder);
       fs.mkdirSync(destDir, { recursive: true });
@@ -610,9 +646,6 @@ async function restoreApply({ name, agentIds }) {
     // 恢复设置文件（ Agents / 项目 / WebDAV / 界面语言 ）
     let appliedConfig = false;
     let projectConfigSkipped = 0;
-    // 项目列表只在「同一台机器」的备份上还原：项目路径是机器相关的，换台电脑恢复过来的一串路径
-    // 基本全是错的，还得用户手工清一遍。机器身份取自 manifest（旧版备份没有这一项 → 不还原）。
-    const sameMachine = !!manifest.machineId && manifest.machineId === getConfig().machineId;
     const cfgFile = path.join(tmpRoot, 'config.json');
     if (fs.existsSync(cfgFile)) {
       try {
