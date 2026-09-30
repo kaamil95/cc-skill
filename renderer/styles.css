@@ -678,6 +678,8 @@ select.input {
 }
 .radio-row { display: flex; gap: 20px; font-size: 13px; color: var(--text); margin-top: 2px; }
 .radio-row label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+/* 目标目录落在项目里时「创建链接」会被禁掉，标签也要跟着灰下去，别只灰一个圆点 */
+.radio-row label:has(input:disabled) { opacity: 0.45; cursor: not-allowed; }
 
 /* ---------------- 目标目录选择器 ---------------- */
 /* 原生 <select> 的选项里塞不下「彩色圆点 + Agent 名 + 灰掉的目录」，只能三选一，

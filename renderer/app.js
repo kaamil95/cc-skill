@@ -1068,6 +1068,9 @@ function setPickerValue(el, value) {
   el.dataset.value = value || '';
   const btn = el.querySelector('.picker-btn');
   if (btn) btn.innerHTML = pickerFaceHTML(el._opts.find((o) => o.value === value));
+  // 让调用方能在选中项变化时做点事（安装弹窗靠它按目标目录调整安装方式）。
+  // fillTargetPicker 初始化时会调到这里，那时 _onPick 还没挂上，所以不会误触发。
+  if (el._onPick) el._onPick(value);
 }
 
 // ------------------------------ 下拉弹层 ------------------------------------
@@ -1170,17 +1173,51 @@ function openPicker(el, focusIdx) {
 }
 
 // --------------------------- 安装（复制 / 链接） -----------------------------
-function openCopyModal(s, preferLink = false) {
+function openCopyModal(s) {
   const fromProject = !!s.project;
   $('#copy-src').innerHTML =
     tf(s.type === 'folder' ? '将安装 {name}（整目录）' : '将安装 {name}（单文件）', { name: esc(s.name) }) +
     (fromProject ? ` <span class="chip proj-chip">${esc(s.project.name)}</span>` : '');
-  const linkAllowed = s.type === 'folder';
-  $('#copy-link-label').style.display = linkAllowed ? '' : 'none';
-  if (linkAllowed && preferLink) $('#copy-mode-link').checked = true;
-  else $('#copy-mode-copy').checked = true;
   const prefer = fromProject ? ((agentById(s.agentIds[0]) || {}).dirs || [])[0] : null;
   fillTargetPicker($('#copy-dir'), prefer);
+
+  // 默认「创建链接」：一份实体、多 Agent 共用是这个应用的主推用法，复制出 N 份各自发散的
+  // 副本正是它要解决的问题。两种情况回落到「复制副本」：
+  //   · 单文件 SKILL —— 建不了链接（copySkill 直接返回 invalid-link）
+  //   · 目标落在项目目录里 —— 项目多是 Git 仓库，链接有被误提交的风险
+  // 所以这一步必须排在 fillTargetPicker 之后：默认值要看当前选中的目标目录。
+  const linkAllowed = s.type === 'folder';
+  $('#copy-link-label').style.display = linkAllowed ? '' : 'none';
+  // 目标目录换到项目里时，链接就不可用了：禁掉选项并退回复制，而不是让界面摆着一个
+  // 按下去会被 doInstall 悄悄改掉的选项。
+  // 只做「降级」：用户自己选的复制不会被掰回链接；但被这一条自动改掉的那次会记下来，
+  // 目标改回可链接的目录时还原 —— 否则「默认链接」在绕一圈项目目录后就悄悄失效了。
+  let autoDowngraded = false;
+  const applyTarget = (isDefault) => {
+    const canLink = linkAllowed && !isProjectTarget(pickerValue($('#copy-dir')));
+    $('#copy-mode-link').disabled = !canLink;
+    $('#copy-link-label').title = canLink ? '' : t('项目目录通常是 Git 仓库，链接有误提交风险');
+    if (!canLink) {
+      if (!$('#copy-mode-copy').checked) autoDowngraded = true;
+      $('#copy-mode-copy').checked = true;
+    } else if (isDefault || autoDowngraded) {
+      $('#copy-mode-link').checked = true;
+      autoDowngraded = false;
+    }
+  };
+  $('#copy-dir')._onPick = () => applyTarget(false);
+  // 用户自己点过单选，就把「自动降级」那笔账销掉 —— 他选的就是他要的。
+  // 用 click 而不是 change：点一个已经选中的单选框不产生 change 事件，但那是明确的表态
+  // （比如刚被自动降级成复制，用户又点了一下复制）。用 onclick 赋值而不是 addEventListener：
+  // 弹窗每次打开都会走到这里，监听器不能叠加。（applyTarget 里的 .checked = true 是程序设的，
+  // 不触发 click，不会误销）
+  $$('input[name=copy-mode]').forEach((r) => {
+    r.onclick = () => {
+      autoDowngraded = false;
+    };
+  });
+  applyTarget(true);
+
   openModal('modal-copy');
   $('#btn-copy-go').onclick = () => doInstall(s, false);
 }

@@ -296,3 +296,29 @@ test('链接列表里属于当前条目的那一行不再重复给按钮', () =>
   assert.match(appJs, /link-here/, '当前条目要有自己的标记');
   assert.match(css, /\.link-here\s*\{/, '缺 .link-here 样式');
 });
+
+test('安装方式默认「创建链接」，且排在最前', () => {
+  // 一份实体、多 Agent 共用是这个应用的主推用法；复制出 N 份各自发散的副本正是它要解决的问题。
+  // 单文件 SKILL 建不了链接（copySkill 直接返回 invalid-link），项目目录里链接有被误提交的风险，
+  // 这两种回落到复制。
+  assert.match(appJs, /const canLink = linkAllowed && !isProjectTarget/, '能不能用链接要按目标目录算');
+  assert.match(appJs, /\$\('#copy-mode-link'\)\.checked = true/, '默认选中链接');
+  assert.match(appJs, /\$\('#copy-mode-copy'\)\.checked = true/, '不可用时退回复制');
+  // 默认值依赖选中的目标目录，所以必须排在 fillTargetPicker 之后
+  const fillAt = appJs.indexOf("fillTargetPicker($('#copy-dir'), prefer)");
+  const defAt = appJs.indexOf('applyTarget(true)');
+  assert.ok(fillAt > 0 && defAt > 0 && fillAt < defAt, '先填目标目录，再定默认安装方式');
+  // 单选行里「创建链接」排在「复制副本」前面，和默认值一致
+  const linkAt = html.indexOf('id="copy-mode-link"');
+  const copyAt = html.indexOf('id="copy-mode-copy"');
+  assert.ok(linkAt > 0 && copyAt > 0 && linkAt < copyAt, '默认项要排在前面');
+});
+
+test('目标目录换到项目里时，链接选项被禁掉并退回复制', () => {
+  // 只做「降级」：用户手选的复制不会被掰回链接；但被这一条自动改掉的那次会记下来
+  // （autoDowngraded），目标改回可链接的目录时还原 —— 否则「默认链接」绕一圈项目目录后就悄悄失效了
+  assert.match(appJs, /\$\('#copy-mode-link'\)\.disabled = !canLink/, '不可用时要禁掉选项');
+  assert.match(appJs, /\$\('#copy-dir'\)\._onPick = /, '目标目录变化时要重新判定');
+  assert.match(appJs, /if \(el\._onPick\) el\._onPick\(value\)/, 'setPickerValue 要通知调用方');
+  assert.match(appJs, /autoDowngraded = true/, '被自动降级的那次要记下来');
+});

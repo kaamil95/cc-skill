@@ -142,8 +142,9 @@
         <div id="copy-dir" class="picker"></div>
         <label class="form-label" data-i18n="安装方式">安装方式</label>
         <div class="radio-row">
-          <label><input type="radio" name="copy-mode" value="copy" id="copy-mode-copy" checked /> <span data-i18n="复制副本">复制副本</span></label>
-          <label id="copy-link-label"><input type="radio" name="copy-mode" value="link" id="copy-mode-link" /> <span data-i18n="创建链接（单一副本）">创建链接（单一副本）</span></label>
+          <!-- 「创建链接」排在最前，它也是默认选中项：一份实体多 Agent 共用是这个应用的主推用法 -->
+          <label id="copy-link-label"><input type="radio" name="copy-mode" value="link" id="copy-mode-link" checked /> <span data-i18n="创建链接（单一副本）">创建链接（单一副本）</span></label>
+          <label><input type="radio" name="copy-mode" value="copy" id="copy-mode-copy" /> <span data-i18n="复制副本">复制副本</span></label>
         </div>
         <p class="hint" style="margin-top:6px">链接 = 在目标目录创建指向唯一副本的目录联接（junction），不复制文件，源更新所有 Agent 即时生效。要求同一磁盘（NTFS）。</p>
         <label class="form-label" data-i18n="目标已存在同名 SKILL 时">目标已存在同名 SKILL 时</label>

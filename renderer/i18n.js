@@ -303,6 +303,7 @@
     '删除失败：': "Delete failed: ",
     '整目录': "folder",
     '项目目录通常是 Git 仓库，链接有误提交风险，已改为复制副本': "Project directories are usually git repos — links risk accidental commits, so it was copied instead",
+    '项目目录通常是 Git 仓库，链接有误提交风险': 'Project directories are usually git repos — a link there risks being committed by mistake',
     '源与目标不在同一磁盘，无法创建链接，已改为复制副本': "Source and target are on different disks — copied instead of linked",
     '目标已存在同名 SKILL，请选择覆盖或自动重命名': "Target already has a skill with this name — choose overwrite or auto-rename",
     '操作失败：': "Operation failed: ",
