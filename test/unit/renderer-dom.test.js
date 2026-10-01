@@ -276,6 +276,9 @@ test('新加的界面文案都有英文对照（英文环境下不会掉出中�
     '从云端永久删除这台机器的整个目录，连同里面 {n} 份备份？\\n这个操作不可撤销。',
     // 总览的云端机器 / 设置的分类页签
     '云端机器',
+    '立即备份',
+    '备份中…',
+    '请先在设置里填写 WebDAV 配置',
     '刷新',
     '管理',
     '查看全部',
@@ -520,6 +523,17 @@ test('机器档案：一台机器一行，恢复 / 备份列表 / 删除都写�
   // 平铺时代的两个中间态按钮不该再出现
   assert.ok(!appJs.includes("t('移出列表')"), '「移出列表」在分目录后只会留下一个认不出的目录，已取消');
   assert.ok(!appJs.includes("t('删除档案与备份')"), '它已被「删除机器（整个目录）」取代');
+});
+
+test('总览的「立即备份」不走设置页，也不经过确认框', () => {
+  // 快捷按钮的意义就在少一步；备份不删除任何东西（最多挤掉 10 份之外的旧份，那是既定策略），
+  // 不属于「要先确认的破坏性操作」。它必须用已保存的配置 —— wdSave 的门已经保证它在设置页
+  // 之外是空操作，这里再钉一层
+  assert.match(appJs, /id="btn-dash-backup"[^>]*>\$\{t\('立即备份'\)\}/, '总览机器卡头部要有它');
+  assert.match(appJs, /#btn-dash-backup'\)\)?[^;]*quickBackup\(e\.target\.closest\('#btn-dash-backup'\)\)/, '要接进总览的点击代理');
+  assert.match(appJs, /function quickBackup\(btn\)/, '处理函数要有');
+  assert.ok(!/function quickBackup\(btn\)[\s\S]{0,900}await wdSave\(\)/.test(appJs), '不许存设置表单 —— 那条路上表单是空白的');
+  assert.match(appJs, /function quickBackup\(btn\)[\s\S]{0,900}invalidateMachines\(\)/, '备份完成要刷新总览的机器列表');
 });
 
 test('恢复弹窗：先说清这份备份是哪台机器的、哪一份', () => {

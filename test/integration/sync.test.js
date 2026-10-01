@@ -993,7 +993,7 @@ test('本机还没在这里备份过时，档案列表也补一行空的自己',
   const self = r.machines.filter((m) => m.self);
   assert.equal(self.length, 1, '本机那一行要在，且只有一行');
   assert.equal(self[0].machineId, fresh.machineId);
-  assert.equal(self[0].dir, 'desktop-dp04gj0-' + fresh.machineId, '这一行给出它将会用的目录名');
+  assert.ok(self[0].dir.endsWith(fresh.machineId), '这一行给出它将会用的目录名（slug 随机器名，不能写死）');
   assert.ok(!stub.machineDirs().includes(self[0].dir), '而云端确实还没有这个目录');
   assert.deepEqual(self[0].backups, [], '还没备份过');
   assert.equal(self[0].name, os.hostname(), '没起过名就显示 hostname');

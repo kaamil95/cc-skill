@@ -755,6 +755,7 @@ function renderDashboard() {
 
 /** 总览上的点击：机器列表的刷新 / 管理与「查看全部日志」都走事件代理（卡片会整块重画） */
 function onDashboardClick(e) {
+  if (e.target.closest('#btn-dash-backup')) return quickBackup(e.target.closest('#btn-dash-backup'));
   if (e.target.closest('#btn-dash-machines-refresh')) return reloadMachines();
   if (e.target.closest('#btn-dash-machines-manage') || e.target.closest('.machine-card')) return openMachines();
   if (e.target.closest('#btn-dash-log-more')) return openLogs();
@@ -771,6 +772,7 @@ function machinesCardHTML() {
       <h3>${t('云端机器')}</h3>
       <span class="hint" id="dash-machines-hint">${esc(machinesHeadHint())}</span>
       <div class="dash-head-acts">
+        <button class="btn sm primary" id="btn-dash-backup">${t('立即备份')}</button>
         <button class="btn sm" id="btn-dash-machines-refresh">${t('刷新')}</button>
         <button class="btn sm" id="btn-dash-machines-manage">${t('管理')}</button>
       </div>
@@ -852,6 +854,31 @@ async function reloadMachines() {
 function invalidateMachines() {
   state.machinesTried = false;
   if (state.filter === 'dashboard') renderGrid(); // 总览在屏幕上就顺手重取
+}
+
+/**
+ * 总览上的「立即备份」：不走设置页，直接用已保存的配置上传一次。
+ * 备份不删除任何东西（最多把 10 份之外的旧份挤掉，且那是既定策略），所以不用确认框 ——
+ * 快捷的意义就在这儿，点完给 toast 即可。
+ */
+async function quickBackup(btn) {
+  if (!webdavReady()) return toast(t('请先在设置里填写 WebDAV 配置'), 'err');
+  const label = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = t('备份中…');
+  try {
+    const r = await api.invoke('sync:backup');
+    if (r.ok) {
+      toast(tf('{name}（{count} 个 SKILL / {size}）', { name: r.name, count: r.count, size: fmtSize(r.size) }), 'ok');
+      toast(t('已备份到云端 ✓'), 'ok');
+      invalidateMachines();
+    } else {
+      toast(t('备份失败：') + r.error, 'err');
+    }
+  } finally {
+    btn.disabled = false;
+    btn.textContent = label;
+  }
 }
 
 // ------------------------------ 总览：最近动态 --------------------------------

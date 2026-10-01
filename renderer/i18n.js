@@ -574,6 +574,8 @@
 
     // ---- 总览：云端机器 ----
     '云端机器': 'Cloud machines',
+    '备份中…': 'Backing up…',
+    '请先在设置里填写 WebDAV 配置': 'Configure the WebDAV server in Settings first',
     '刷新': 'Refresh',
     '管理': 'Manage',
     '查看全部': 'View all',
