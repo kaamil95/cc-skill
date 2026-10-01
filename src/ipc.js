@@ -228,21 +228,27 @@ function registerIpcHandlers({ getWindow, appDir, userData, applyProxy }) {
 
   // ------------------------------ WebDAV 云同步 -------------------------------
   handle('sync:getConfig', () => ({ ok: true, webdav: webdav.webdavCfg() }));
-  handle('sync:setConfig', ({ webdav: w }) => webdav.setWebdavConfig(w));
+  // 保存配置后顺手把本机的机器档案写上云：只保存不上传的话，这台机器要等到第一次备份
+  // 才会出现在别的机器的列表里。失败不阻塞保存 —— 第一次备份还会写
+  handle('sync:setConfig', async ({ webdav: w }) => {
+    const r = webdav.setWebdavConfig(w);
+    if (r.ok && webdav.webdavCfg().url) await webdav.registerMachine();
+    return r;
+  });
   handle('sync:test', () => webdav.testConnection());
   handle('sync:backup', () => webdav.backup());
-  handle('sync:restoreInfo', () => webdav.restoreInfo());
-  handle('sync:restoreApply', ({ name, agentIds, adoptMachine, allowExternalDirs }) =>
-    webdav.restoreApply({ name, agentIds, adoptMachine, allowExternalDirs })
+  handle('sync:restoreInfo', ({ dir, name }) => webdav.restoreInfo({ dir, name }));
+  handle('sync:restoreApply', ({ dir, name, agentIds, adoptMachine, allowExternalDirs }) =>
+    webdav.restoreApply({ dir, name, agentIds, adoptMachine, allowExternalDirs })
   );
 
-  // 机器档案：云端各机器的侧车、改名、认领、移出、重置本机标识
+  // 机器档案：云端按机器分目录，每个目录一台机器；改名、认领、重置标识、删目录、删某一份备份
   handle('sync:machines', () => webdav.listMachines());
   handle('sync:renameMachine', ({ machineId, name }) => renameMachine(machineId, name));
   handle('sync:adoptMachine', ({ machineId }) => webdav.adoptMachineId(machineId));
   handle('sync:resetMachine', () => webdav.resetMachineId());
-  handle('sync:forgetMachine', ({ file, deleteBackups }) => webdav.forgetMachine({ file, deleteBackups }));
-  handle('sync:deleteBackup', ({ name }) => webdav.deleteBackup({ name }));
+  handle('sync:deleteMachine', ({ dir }) => webdav.deleteMachine({ dir }));
+  handle('sync:deleteBackup', ({ dir, name }) => webdav.deleteBackup({ dir, name }));
 
   // ------------------------------ 网络代理 ------------------------------------
   // 代理是本机配置（不进云备份）：手动模式可能带凭据，且 127.0.0.1 换台机器就不对了

@@ -151,9 +151,10 @@
     '服务器地址': 'Server URL',
     '用户名': 'Username',
     '密码': 'Password',
-    '远程目录': 'Remote directory',
-    '留空即用默认目录 cc-skill-sync（无需以 / 开头）；换一个目录就等于把备份放到云端的另一处。':
-      'Leave it empty to use the default directory cc-skill-sync (no leading / needed). A different directory simply keeps the backup elsewhere in your cloud drive.',
+    '云端根目录固定为 cc-skill-sync，每台机器在它下面各占一个子目录；多台机器共用一个网盘也不会互相覆盖。':
+      'The cloud root is fixed at cc-skill-sync; each machine gets its own subdirectory under it, so several machines can share one drive without overwriting each other.',
+    '本机还没有云端备份 —— 请先选一台机器，再挑它的备份':
+      'This machine has no backup in the cloud yet — pick a machine first, then one of its backups',
     '自动备份': 'Auto backup',
     '每次启动时': 'On startup',
     '每天': 'Daily',
@@ -230,19 +231,29 @@
     '＋ 添加 SKILL 目录': '+ Add skill directory',
     '从云端恢复': 'Restore from cloud',
     '确认恢复': 'Confirm Restore',
+    '换一份…': 'Pick another…',
+    '来源机器': 'Source machine',
     '上传设备': 'Uploaded from device',
     '上传时间': 'Uploaded at',
     '远程路径': 'Remote path',
     '包含内容': 'Contents',
     '备份来源': 'Backup source',
-    '本机上次备份': "This machine's last backup",
-    '云端最新一条（本机尚未备份过）': 'Latest on the cloud (this machine has not backed up yet)',
+    '本机目录里的备份': "This machine's folder",
+    '另一台机器的备份': "Another machine's backup",
+    '（没有档案）': '(no profile)',
     '要重建哪些 Agent 的全局 SKILL': 'Which agents to rebuild global skills for',
-    '另有 {n} 个项目 SKILL 不在恢复范围内（随项目仓库走）': '{n} project skills are out of scope (they travel with their project repo)',
-    '旧版备份的目录按原机器的用户目录记录，恢复时会自动映射到本机': 'This is an older backup: its directories are recorded against the original machine, and will be mapped onto this machine automatically',
-    '未恢复 {n} 个项目 SKILL（随项目仓库走）': '{n} project skills were not restored (they travel with their project repo)',
+    '另有 {n} 个项目 SKILL 会一并恢复到本机的项目里':
+      '{n} project skills will also be restored — into this machine’s projects',
+    '另有 {n} 个项目 SKILL 不会恢复：这份备份不是本机的（勾下面的认领可以把它认回来）':
+      '{n} project skills will NOT be restored: this backup is not this machine’s (tick the claim box below to make it so)',
+    '这份备份没有 Agent 明细（上传时侧车没写成功），只能整包恢复':
+      'This backup carries no per-agent detail (its sidecar upload failed), so it can only be restored whole',
+    '同时恢复了 {n} 个项目 SKILL ✓': 'Also restored {n} project skills ✓',
+    '未恢复 {n} 个项目 SKILL：这份备份不是本机的（勾「这就是这台电脑」可以认回来）':
+      '{n} project skills were not restored: this backup is not this machine’s (tick “this is this computer” to claim it)',
+    '未恢复 {n} 个项目 SKILL：它们的项目没在本机登记过':
+      '{n} project skills were not restored: their projects are not registered on this machine',
     '未恢复 {n} 个未勾选 Agent 的 SKILL': '{n} skills belonging to unselected agents were not restored',
-    '{n} 个旧版目录已按本机用户目录重新映射': '{n} legacy directories were remapped onto this machine',
     '跳过 {n} 个路径非法的条目': 'Skipped {n} entries with invalid paths',
     '恢复将覆盖本机同名的全局 SKILL': 'Restoring will OVERWRITE global skills with the same name on this machine',
     '已移除项目 ✓': 'Project removed ✓',
@@ -379,8 +390,7 @@
     '{name}（{count} 个 SKILL / {size}）': '{name} ({count} skills / {size})',
     '{n} 个 SKILL + config.json': '{n} skills + config.json',
     '已从云端恢复 {n} 个 SKILL ✓': 'Restored {n} skills from the cloud ✓',
-    '什么时候用这个 SKILL…': 'When should this skill be used…',
-    '如 MyAgent': 'e.g. MyAgent',
+    '什么时候用这个 SKILL…': 'When should this skill be used…',    '如 MyAgent': 'e.g. MyAgent',
     '技能目录默认为 ~/.<名称>/skills，首次安装时自动创建；也可稍后在详情中添加目录。': 'The skill directory defaults to ~/.<name>/skills and is created on first install; you can add more directories in the detail view later.',
     '用系统默认编辑器打开磁盘日志': 'Open the on-disk log in the default editor',
     '{n} 个': '{n} items',
@@ -484,8 +494,8 @@
     '从文件导入配置': 'Import config from file',
     '导出时包含 WebDAV 密码': 'Include the WebDAV password when exporting',
     '（未命名，用 hostname）': '(unnamed, using the hostname)',
-    '机器标识决定「云端哪份备份是本机的」。重装系统后会生成新标识，恢复时勾一下「这就是这台电脑」即可认领回来；机器名只用于显示，随备份上传。':
-      'The machine id decides which cloud backup counts as this machine’s. A fresh OS install mints a new one — tick "This is this computer" when restoring to claim the old one back. The name is display-only and travels with the backup.',
+    '机器标识决定云端哪个子目录是本机的。重装系统后会生成新标识，在恢复弹窗里勾一下「这就是这台电脑」即可认领回来，之后备份仍写回原来那个目录；机器名只用于显示，随备份上传。':
+      'The machine id decides which cloud folder is this machine’s. A fresh OS install mints a new one — tick "This is this computer" when restoring to claim the old one back, and backups keep going to the original folder. The name is display-only and travels with the backup.',
     '本机的名字会随备份上传，别的机器看到的就是它；留空则回落到 hostname。':
       'Your machine’s name travels with the backup and is what other machines see. Leave it empty to fall back to the hostname.',
     '给别的机器起的名字只在本机显示，不会写回云端——那台机器下次备份会用自己的名字覆盖掉。':
@@ -511,32 +521,34 @@
     '读取失败': 'Failed to read',
     '远程目录：{p}': 'Remote directory: {p}',
     '云端还没有这台机器的备份': 'This machine has no backup in the cloud yet',
-    '最后备份 {t} · 备份已不在云端（可能被保留策略清掉了）': 'Last backup {t} · the backup is no longer in the cloud (the retention policy may have removed it)',
+    '这个目录里没有档案也没有备份': 'No profile and no backup in this folder',
+    '最后备份 {t}': 'Last backup {t}',
     '最后备份 {t} · {n} 个 SKILL · {s}': 'Last backup {t} · {n} skills · {s}',
+    '{n} 个 SKILL · {s}': '{n} skills · {s}',
     '本机': 'This machine',
     '设为我的机器标识': 'Make it my machine id',
-    '移出列表': 'Remove from list',
-    '删除档案与备份': 'Delete profile and backup',
+    '恢复': 'Restore',
+    '收起': 'Collapse',
+    '备份 {n} 份': '{n} backups',
+    '删除机器': 'Delete machine',
     '删除备份': 'Delete backup',
     '把本机标识改成「{n}」，从而认领它的备份？\n本机现在的标识会被替换掉，之后「本机的备份」指的就是这一台了。':
       'Change this machine’s id to "{n}" and claim its backups?\nYour current id is replaced — from then on "my backup" means that machine’s.',
     '认领': 'Claim',
-    '把这台机器从档案列表里移出？\n它的备份包留在云端不动，需要时还能手动恢复。':
-      'Remove this machine from the profile list?\nIts backup stays in the cloud and can still be restored by hand.',
-    '移出': 'Remove',
-    '把这台机器从档案列表里移出，并连它最近那一份备份一起从云端永久删除？\n这个操作不可撤销。':
-      'Remove this machine from the profile list AND permanently delete its most recent backup from the cloud?\nThis cannot be undone.',
+    '从云端永久删除这台机器的整个目录，连同里面 {n} 份备份？\n这个操作不可撤销。':
+      'Permanently delete this machine’s whole cloud folder, together with the {n} backups inside it?\nThis cannot be undone.',
+    '从云端永久删除这台机器的整个目录？\n这个操作不可撤销。':
+      'Permanently delete this machine’s whole cloud folder?\nThis cannot be undone.',
     '从云端永久删除 {n}？\n这个操作不可撤销。': 'Permanently delete {n} from the cloud?\nThis cannot be undone.',
     '操作失败': 'Action failed',
     '已完成 ✓': 'Done ✓',
     '已认领这台机器 ✓': 'Machine claimed ✓',
     '已认领这台机器，本机标识已更新 ✓': 'Machine claimed — this machine’s id has been updated ✓',
     '另一台电脑': 'another computer',
-    '每台在这里备份过的机器一份档案。备份包的归属只能靠档案里的记录得知（包名不带机器标识），所以「删除备份」删的是它记着的那一份；更早的快照由云端保留策略收敛。':
-      'One profile per machine that has backed up here. Which backup belongs to whom is only knowable from the profile record (file names carry no machine id), so "delete backup" removes the one it records; older snapshots are culled by the cloud retention policy.',
-    '未被任何档案引用的备份': 'Backups no profile refers to',
-    '这份备份来自「{name}」，不是本机。勾上表示这就是这台电脑（例如刚重装过系统），项目配置与 HOME 之外的目录会一并还原。':
-      'This backup came from "{name}", not from this machine. Tick this if it is this computer (a fresh OS install, say) — project entries and directories outside HOME are then restored too.',
+    '云端按机器分目录：每台备份过的机器一个子目录，备份包与它那一份信息都在里面。可以直接用别的机器的备份来恢复本机 —— 那只会还原全局 SKILL，项目级的只在恢复本机自己的备份时才回来。':
+      'The cloud keeps one folder per machine, each holding that machine’s backups and the record of what is in them. You can restore from another machine’s backup directly — that brings back global skills only; project-level ones come back when the backup is this machine’s own.',
+    '这份备份来自「{name}」，不是本机。勾上表示这就是这台电脑（例如刚重装过系统），项目配置与它名下的项目 SKILL 会一并还原。':
+      'This backup came from "{name}", not from this machine. Tick this if it is this computer (a fresh OS install, say) — project entries and the project skills under them are then restored too.',
     '保存': 'Save',
     '改名': 'Rename',
     '来自「{n}」的配置': 'Config from "{n}"',
@@ -567,8 +579,8 @@
     '查看全部': 'View all',
     '共 {n} 台': '{n} machines',
     '未备份': 'No backup',
-    '备份已失效': 'Backup missing',
-    '已备份': 'Backed up',
+    '认不出': 'Unrecognised',
+    '{n} 份': '{n} backups',
     '云端还没有任何机器档案，上传一次备份就会出现这台机器。': 'No machine profiles in the cloud yet — one shows up here after the first backup.',
     '已从云端读到 {n} 台机器 ✓': 'Read {n} machines from the cloud ✓',
     '读取云端档案失败：': 'Failed to read the cloud profiles: ',

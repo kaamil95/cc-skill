@@ -34,7 +34,7 @@ const IPC_CHANNELS = [
   'sync:renameMachine',
   'sync:adoptMachine',
   'sync:resetMachine',
-  'sync:forgetMachine',
+  'sync:deleteMachine',
   'sync:deleteBackup',
   'proxy:get',
   'proxy:set',

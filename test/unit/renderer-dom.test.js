@@ -254,13 +254,26 @@ test('新加的界面文案都有英文对照（英文环境下不会掉出中�
     '从文件导入配置',
     '导出时包含 WebDAV 密码',
     '设为我的机器标识',
-    '移出列表',
-    '删除档案与备份',
+    '删除机器',
     '本机',
     '另一台电脑',
-    '未被任何档案引用的备份',
-    '这份备份来自「{name}」，不是本机。勾上表示这就是这台电脑（例如刚重装过系统），项目配置与 HOME 之外的目录会一并还原。',
+    '恢复',
+    '收起',
+    '备份 {n} 份',
+    '来源机器',
+    '换一份…',
+    '本机目录里的备份',
+    '另一台机器的备份',
+    '这份备份来自「{name}」，不是本机。勾上表示这就是这台电脑（例如刚重装过系统），项目配置与它名下的项目 SKILL 会一并还原。',
     '未恢复 {n} 个项目配置：这份备份不算本机的。若这就是本机（例如刚重装过系统），重新打开弹窗勾选「这就是这台电脑」再来一次。',
+    '另有 {n} 个项目 SKILL 会一并恢复到本机的项目里',
+    '另有 {n} 个项目 SKILL 不会恢复：这份备份不是本机的（勾下面的认领可以把它认回来）',
+    '未恢复 {n} 个项目 SKILL：这份备份不是本机的（勾「这就是这台电脑」可以认回来）',
+    '未恢复 {n} 个项目 SKILL：它们的项目没在本机登记过',
+    '同时恢复了 {n} 个项目 SKILL ✓',
+    '云端按机器分目录：每台备份过的机器一个子目录，备份包与它那一份信息都在里面。可以直接用别的机器的备份来恢复本机 —— 那只会还原全局 SKILL，项目级的只在恢复本机自己的备份时才回来。',
+    // 词条里的 \n 在 i18n.js 源码里是转义写法，这里也要照抄转义，否则比的是真换行
+    '从云端永久删除这台机器的整个目录，连同里面 {n} 份备份？\\n这个操作不可撤销。',
     // 总览的云端机器 / 设置的分类页签
     '云端机器',
     '刷新',
@@ -268,8 +281,8 @@ test('新加的界面文案都有英文对照（英文环境下不会掉出中�
     '查看全部',
     '共 {n} 台',
     '未备份',
-    '已备份',
-    '备份已失效',
+    '认不出',
+    '{n} 份',
     '云端还没有任何机器档案，上传一次备份就会出现这台机器。',
     '已从云端读到 {n} 台机器 ✓',
     '读取云端档案失败：',
@@ -281,8 +294,8 @@ test('新加的界面文案都有英文对照（英文环境下不会掉出中�
     '恢复默认只影响 Agents、SKILL 目录与项目列表，不会删除磁盘上的任何文件。',
     '导出配置到文件',
     '从文件导入配置',
-    '远程目录',
-    '留空即用默认目录 cc-skill-sync（无需以 / 开头）；换一个目录就等于把备份放到云端的另一处。',
+    '云端根目录固定为 cc-skill-sync，每台机器在它下面各占一个子目录；多台机器共用一个网盘也不会互相覆盖。',
+    '本机还没有云端备份 —— 请先选一台机器，再挑它的备份',
     '链路通（{ms} ms），目标返回 HTTP {s}：多为 GitHub 匿名限流（每小时 60 次），在「发现」里填个 Token 即可',
   ]) {
     assert.ok(dict.includes(`'${key}':`) || dict.includes(`"${key}":`), 'i18n.js 缺少词条：' + key);
@@ -475,18 +488,86 @@ test('总览的最近动态随日志实时刷新', () => {
   assert.match(appJs, /id="dash-log-hint"/, '条数那行也要能单独刷（不然「共 0 条」会留着）');
 });
 
-test('机器卡片的三种状态各有形状与颜色，不是只靠文字', () => {
-  // 三个分支逐个钉住：改错映射（例如把「备份已失效」判成 ok）测试必须变红，
+test('机器卡片的状态各有形状与颜色，不是只靠文字', () => {
+  // 分支逐个钉住：改错映射（例如把「认不出」判成 ok）测试必须变红，
   // 只断言函数存在是不够的
-  assert.match(appJs, /if \(!m\.backup \|\| !m\.backup\.created\) return \{ cls: '', label: t\('未备份'\) \};/, '没有备份 = 灰点 + 未备份');
-  assert.match(appJs, /if \(!m\.backup\.present\) return \{ cls: 'warn', label: t\('备份已失效'\) \};/, '备份已不在云端（被保留策略清掉）= 橙点 + 备份已失效');
-  assert.match(appJs, /return \{ cls: 'ok', label: t\('已备份'\) \};/, '备份在且最新 = 绿点 + 已备份');
+  assert.match(
+    appJs,
+    /if \(!m\.backups \|\| !m\.backups\.length\) return m\.unreadable \? \{ cls: 'warn', label: t\('认不出'\) \} : \{ cls: '', label: t\('未备份'\) \};/,
+    '没有备份 = 灰点；档案读不出来（认不出是哪台）= 橙点'
+  );
+  assert.match(appJs, /return \{ cls: 'ok', label: tf\('\{n\} 份', \{ n: m\.backups\.length \}\) \};/, '有备份 = 绿点 + 份数');
   for (const cls of ['', '.ok', '.warn']) assert.ok(css.includes('.machine-state' + cls), '缺状态胶囊样式：machine-state' + cls);
   assert.match(css, /\.machine-dot\.ok\s*\{\s*background:\s*var\(--green\)/, '圆点要按状态上色（ok 用绿）');
   assert.match(css, /\.machine-dot\.warn\s*\{\s*background:\s*var\(--orange\)/, '圆点要按状态上色（warn 用橙）');
   assert.match(css, /\.machine-card\.self\s*\{/, '本机要能一眼分出来（强调色竖标）');
   // 卡片与「云端机器档案」弹窗共用同一行文案，免得同一份数据两处各说各话
   assert.match(appJs, /const line = machineBackupLine\(m\)/, '卡片要复用弹窗那行文案');
+});
+
+// ------------------------------ 云端机器档案：按机器分目录 ----------------------
+// 踩过：平铺布局下备份包的归属只能靠侧车记着的那一份，于是「这台机器有几份备份」
+// 无从得知（界面自己都承认过这一点），恢复也只能在「我的那份」与「全局最新」之间二选一。
+// 现在云端每台机器一个目录，份数与归属都由目录本身决定。
+test('机器档案：一台机器一行，恢复 / 备份列表 / 删除都写明是哪一台', () => {
+  assert.match(appJs, /function machineRowHTML\(m, open\)/, '每行要知道自己是不是展开着');
+  assert.match(appJs, /btnHTML\('useBackup', \{ dir: m\.dir, name: m\.latest\.name \}, t\('恢复'\)/, '每行要有「恢复」入口');
+  assert.match(appJs, /btnHTML\('deleteMachine', \{ dir: m\.dir, n: m\.backups\.length \}/, '删的是整个目录，份数要带进确认框');
+  assert.match(appJs, /btnHTML\('toggle', \{ dir: m\.dir \}/, '要能展开挑历史副本');
+  assert.match(appJs, /state\.machinesOpen = state\.machinesOpen === dir \? '' : dir/, '展开状态按目录记');
+  assert.ok(/\.mc-backups\s*\{/.test(css), '缺展开后备份列表的样式');
+  assert.ok(/\.mc-backup\s*\{/.test(css), '缺单份备份那一行的样式');
+  // 平铺时代的两个中间态按钮不该再出现
+  assert.ok(!appJs.includes("t('移出列表')"), '「移出列表」在分目录后只会留下一个认不出的目录，已取消');
+  assert.ok(!appJs.includes("t('删除档案与备份')"), '它已被「删除机器（整个目录）」取代');
+});
+
+test('恢复弹窗：先说清这份备份是哪台机器的、哪一份', () => {
+  assert.match(html, /id="rv-machine"/, '要有「来源机器」一行');
+  assert.match(html, /id="btn-restore-switch"/, '要有「换一份…」的入口');
+  assert.match(appJs, /\$\('#rv-machine'\)\.textContent = \[info\.machineName \|\| info\.hostname/, '来源机器要显示名字与目录');
+  assert.match(appJs, /dir: state\.restoreDir,\s*name: state\.restoreName,/, '确认恢复要把目录与备份名一起回传');
+});
+
+test('恢复的各条入口都不能把没填过的设置表单存回去', () => {
+  // 真机踩过：机器档案里点「恢复」→ openRestore 先 wdSave() —— 而设置表单从没填过（全空白），
+  // 一保存就把用户配好的 WebDAV 连密码一起抹掉，恢复随即报「请先填写 WebDAV 配置」。
+  // 门在 wdSave 本身：设置弹窗没开就直接短路
+  const at = appJs.indexOf('async function wdSave()');
+  const fn = appJs.slice(at, at + 900);
+  assert.match(fn, /if \(\$\('#modal-settings'\)\.classList\.contains\('hidden'\)\) return true;/, '设置弹窗没开时 wdSave 必须短路');
+  const openRestoreBody = appJs.slice(appJs.indexOf('async function openRestore('), appJs.indexOf("$('#btn-wd-restore')"));
+  assert.ok(!/\bawait wdSave\(\)/.test(openRestoreBody), 'openRestore 自己不许存表单');
+  // 设置页那个按钮的表单就在眼前，它保留「先存再恢复」
+  assert.match(appJs, /#btn-wd-restore'\)\.addEventListener\('click', async \(\) => \{\s*if \(!\(await wdSave\(\)\)\) return toast/, '设置页入口要先存再恢复');
+});
+
+test('「从云端下载」先认本机自己的备份，没有就把选择权交给用户', () => {
+  const at = appJs.indexOf('async function openRestore(');
+  const body = appJs.slice(at, appJs.indexOf("$('#btn-wd-restore')"));
+  assert.match(body, /sync:machines/, '要先看云端机器列表');
+  assert.match(body, /m\.self && m\.backups\.length/, '只认本机目录里真有备份的那一行');
+  assert.match(body, /openMachines\(\)/, '本机还没有备份时转到机器档案去挑，而不是静默退回「云端最新一条」');
+});
+
+test('项目级 SKILL 的归属跟着「是不是本机的备份」走，勾选框一改提示就变', () => {
+  // 勾「这就是这台电脑」等于断言「这份备份是本机的」，项目级 SKILL 的提示必须跟着改 ——
+  // 否则用户勾完看到的还是「不会恢复」
+  assert.match(appJs, /function restoreSameMachine\(info\)/, '要有一个统一的判定');
+  assert.match(appJs, /function renderRestoreNotes\(info\)/, '提示单独拆一层');
+  assert.match(appJs, /\$\('#rv-adopt'\)\.addEventListener\('change'/, '勾选后要重画提示');
+  assert.match(appJs, /if \(state\.restoreInfo\) renderRestoreNotes\(state\.restoreInfo\)/, '重画用的是弹窗那一份信息');
+  // 勾一下认领绝不能把上面那组 Agent 勾选框重建一遍：用户取消掉的会被悄悄勾回来，
+  // 恢复范围就跟着变了
+  assert.ok(
+    !/\$\('#rv-adopt'\)\.addEventListener\('change',[^;]*renderRestoreScope\(/.test(appJs),
+    '认领的 change 处理器不许调 renderRestoreScope（那会重建勾选框）'
+  );
+  // 认领行要先摆好（它会把勾选框重置），提示才读得对
+  const adoptAt = appJs.indexOf('  renderAdoptRow(info);\n  // 按钮的可用状态');
+  const scopeAt = appJs.indexOf('  renderRestoreScope(info);\n  $(#rv-status'.replace('(#', "('#"));
+  assert.ok(adoptAt > 0 && scopeAt > adoptAt, 'renderAdoptRow 要排在 renderRestoreScope 之前');
+  assert.match(appJs, /if \(projectCount\) \{/, '有项目级 SKILL 时才提这一句');
 });
 
 // ------------------------------ 设置：两处容易混的入口 -------------------------
@@ -500,15 +581,16 @@ test('「导入 SKILL」与「导入配置」在名字上就分得开', () => {
 });
 
 // 远程目录是可留空的一项：默认值写在提示里，不逼着用户填
-test('远程目录标成可留空，留空落到默认目录', () => {
-  assert.match(html, /id="wd-path" class="input" placeholder="cc-skill-sync"/, '占位符要显示默认目录');
-  // 退一档靠的是标签变淡（.wd-optional）+ 下面那行说明；标签本身不加「（可留空）」，
-  // 76px 的标签列塞不下，会折成两行
-  assert.match(html, /<label class="wd-optional" data-i18n="远程目录">/, '标签要退一档');
-  assert.match(html, /class="hint wd-span"[\s\S]{0,200}留空即用默认目录 cc-skill-sync/, '说明里要有默认值');
-  assert.match(appJs, /remotePath: \$\('#wd-path'\)\.value\.trim\(\) \|\| 'cc-skill-sync'/, '留空要真的落到默认值（不只是提示）');
-  assert.match(css, /\.wd-grid label\.wd-optional\s*\{[^}]*--text-3/, '可留空那一项要真的变淡');
-  assert.match(css, /\.wd-grid \.wd-span\s*\{[^}]*grid-column: 1 \/ -1/, '说明要另占一整行');
+test('远程目录不再是输入项：根目录固定，说明里讲清子目录规矩', () => {
+  // 云端已按机器分目录，让用户填根目录只会引来「两台机器填了不同的根目录就互相看不见」
+  // 这类问题。所以那格输入删掉，只留一行说明
+  assert.ok(!html.includes('id="wd-path"'), '不该再有远程目录输入框');
+  assert.ok(!appJs.includes("$('#wd-path')"), 'app.js 也不该再引用它');
+  assert.ok(!html.includes('wd-optional'), '可留空那套样式随输入框一起退场');
+  assert.ok(!css.includes('.wd-optional'), 'CSS 里同样不该再有');
+  assert.match(html, /data-i18n="云端根目录固定为 cc-skill-sync，每台机器在它下面各占一个子目录；多台机器共用一个网盘也不会互相覆盖。"/, '要有一行说明');
+  // 服务器地址 / 用户名 / 密码三样还在
+  for (const id of ['wd-url', 'wd-user', 'wd-pass']) assert.ok(html.includes(`id="${id}"`), '还该有 #' + id);
 });
 
 // ------------------------------ 设置：分类页签 ---------------------------------

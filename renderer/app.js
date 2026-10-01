@@ -45,8 +45,11 @@ const state = {
   importSrc: null,
   logs: [],
   unreadErrors: 0,
+  restoreDir: '',
   restoreName: null,
   restoreAgents: null,
+  // 弹窗里那一份备份的完整信息：勾「这就是这台电脑」时要拿它重画恢复范围
+  restoreInfo: null,
   dupGroups: [],
   editingAgents: null,
   editingProjects: null,
@@ -65,6 +68,8 @@ const state = {
   machinesTried: false,
   machinesError: '',
   machinesRemote: '',
+  // 机器档案里展开着的那台机器（目录名），空 = 全收起
+  machinesOpen: '',
   renameTarget: null,
   // 设置弹窗当前停在的分类页签
   settingsTab: 'appear',
@@ -794,9 +799,9 @@ function machinesInnerHTML() {
 
 /** 一台机器的备份状态：决定圆点与胶囊的颜色（cls 为空 = 云端还没有它的备份） */
 function machineState(m) {
-  if (!m.backup || !m.backup.created) return { cls: '', label: t('未备份') };
-  if (!m.backup.present) return { cls: 'warn', label: t('备份已失效') };
-  return { cls: 'ok', label: t('已备份') };
+  // 目录在、但档案读不出来（认不出是哪台）→ 橙点：它正是最该被处理的那种
+  if (!m.backups || !m.backups.length) return m.unreadable ? { cls: 'warn', label: t('认不出') } : { cls: '', label: t('未备份') };
+  return { cls: 'ok', label: tf('{n} 份', { n: m.backups.length }) };
 }
 
 function machineCardHTML(m) {
@@ -1675,7 +1680,6 @@ function fillWebdavInputs(w) {
   $('#wd-url').value = w.url || '';
   $('#wd-user').value = w.username || '';
   $('#wd-pass').value = w.password || '';
-  $('#wd-path').value = w.remotePath || 'cc-skill-sync';
   $('#wd-auto').checked = !!w.autoBackup;
   $('#wd-freq').value = w.autoBackupFreq || 'startup';
   wdResetStatus();
@@ -1686,12 +1690,15 @@ function wdReadInputs() {
     url: $('#wd-url').value.trim(),
     username: $('#wd-user').value.trim(),
     password: $('#wd-pass').value,
-    remotePath: $('#wd-path').value.trim() || 'cc-skill-sync',
     autoBackup: $('#wd-auto').checked,
     autoBackupFreq: $('#wd-freq').value,
   };
 }
 async function wdSave() {
+  // 只在设置弹窗开着时才有「刚填的表单」可言。总览 / 机器档案那条路上表单从没填过（全空白），
+  // 一保存就会把用户配好的 WebDAV 连密码一起抹掉 —— 真机踩过：点「恢复」之后配置直接空了。
+  // 所以设置页之外的入口在这里直接短路，用的一律是已保存的配置
+  if ($('#modal-settings').classList.contains('hidden')) return true;
   const r = await api.invoke('sync:setConfig', { webdav: wdReadInputs() });
   if (r.ok) {
     state.webdav = wdReadInputs();
@@ -1889,13 +1896,12 @@ async function loadMachines() {
   renderDashboardMachines();
   if (!r || !r.ok) {
     $('#mc-list').innerHTML = '';
-    $('#mc-orphan-box').hidden = true;
     $('#mc-status').textContent = '✗ ' + state.machinesError;
     return r;
   }
   state.machines = r.machines || [];
   $('#mc-status').textContent = r.remote ? tf('远程目录：{p}', { p: r.remote }) : '';
-  renderMachines(r);
+  renderMachines();
   return r;
 }
 
@@ -1905,32 +1911,59 @@ async function openMachines() {
 }
 
 function machineBackupLine(m) {
-  if (!m.backup || !m.backup.created) return t('云端还没有这台机器的备份');
-  const when = new Date(m.backup.created).toLocaleString();
-  if (!m.backup.present) return tf('最后备份 {t} · 备份已不在云端（可能被保留策略清掉了）', { t: when });
-  return tf('最后备份 {t} · {n} 个 SKILL · {s}', { t: when, n: m.backup.entries, s: fmtSize(m.backup.size) });
+  if (m.unreadable && !m.backups.length) return t('这个目录里没有档案也没有备份');
+  if (!m.backups.length) return t('云端还没有这台机器的备份');
+  const latest = m.latest || {};
+  const when = latest.created ? new Date(latest.created).toLocaleString() : '—';
+  if (latest.entries) return tf('最后备份 {t} · {n} 个 SKILL · {s}', { t: when, n: latest.entries, s: fmtSize(latest.size) });
+  return tf('最后备份 {t}', { t: when });
 }
 
-function machineRowHTML(m) {
+/** 一台机器的那份备份列表（展开后才拉）：恢复 / 删除都按具体某一份来 */
+function machineBackupsHTML(m) {
+  return `<div class="mc-backups">
+    ${m.backups
+      .slice()
+      .reverse()
+      .map((b) => {
+        const when = b.created ? new Date(b.created).toLocaleString() : b.name;
+        const newest = m.latest && m.latest.name === b.name && m.latest.entries;
+        const detail = newest ? tf(' · {n} 个 SKILL · {s}', { n: m.latest.entries, s: fmtSize(m.latest.size) }) : '';
+        return `<div class="mc-backup">
+          <span class="mc-backup-time mono">${esc(when)}</span><span class="hint">${esc(detail)}</span>
+          <span class="mc-acts">
+            ${btnHTML('useBackup', { dir: m.dir, name: b.name }, t('恢复'), ' primary')}
+            ${btnHTML('deleteBackup', { dir: m.dir, name: b.name }, t('删除'), ' danger')}
+          </span>
+        </div>`;
+      })
+      .join('')}
+  </div>`;
+}
+
+function machineRowHTML(m, open) {
   const acts = [];
+  // 恢复：本机那份回来的是「全局 + 项目」，别人的只回全局 —— 提示语在确认弹窗里说清楚
+  if (m.backups.length) acts.push(btnHTML('useBackup', { dir: m.dir, name: m.latest.name }, t('恢复'), ' primary'));
+  if (m.backups.length) acts.push(btnHTML('toggle', { dir: m.dir }, open ? t('收起') : tf('备份 {n} 份', { n: m.backups.length })));
   // 读不出标识的坏档案只能删——改名/认领都要有 id 才成立
   if (m.machineId) acts.push(btnHTML('rename', { id: m.machineId }, t('改名')));
   if (m.self) {
     acts.push(`<span class="mc-tag">${esc(t('本机'))}</span>`);
   } else {
     if (m.machineId) acts.push(btnHTML('adopt', { id: m.machineId }, t('设为我的机器标识')));
-    acts.push(btnHTML('forget', { file: m.file }, t('移出列表')));
-    // 把要删的备份文件名带进按钮，确认框里要显示它 —— 「最近那一份」是哪一份得让用户看得见
-    acts.push(btnHTML('purge', { file: m.file, backup: (m.backup && m.backup.name) || '' }, t('删除档案与备份'), ' danger'));
+    acts.push(btnHTML('deleteMachine', { dir: m.dir, n: m.backups.length }, t('删除机器'), ' danger'));
   }
+  // 认不出标识时只剩目录名可显示，那就别在标题下面再重复一遍同一个名字
+  const sub = [m.hostname, m.machineId ? m.machineId.slice(0, 8) : m.dir === m.name ? '' : m.dir].filter(Boolean).join('   ');
   return `<div class="mc-row${m.self ? ' mc-row-self' : ''}">
     <div class="mc-main">
-      <div class="mc-title">${esc(m.name)}${m.machineId ? '' : ' ⚠'}</div>
-      <div class="mc-sub">${esc([m.hostname, m.machineId ? m.machineId.slice(0, 8) : ''].filter(Boolean).join('   '))}</div>
+      <div class="mc-title">${esc(m.name)}${m.unreadable ? ' ⚠' : ''}</div>
+      ${sub ? `<div class="mc-sub">${esc(sub)}</div>` : ''}
       <div class="mc-detail">${esc(machineBackupLine(m))}</div>
     </div>
     <div class="mc-acts">${acts.join('')}</div>
-  </div>`;
+  </div>${open && m.backups.length ? machineBackupsHTML(m) : ''}`;
 }
 
 /** 一行里的动作按钮：dataset 带上动作与目标，事件代理统一处理 */
@@ -1941,27 +1974,29 @@ function btnHTML(act, data, label, extraClass = '') {
   return `<button class="btn sm mc-act${extraClass}" data-act="${act}"${attrs}>${esc(label)}</button>`;
 }
 
-function renderMachines(r) {
-  $('#mc-list').innerHTML = state.machines.map(machineRowHTML).join('');
-  const orphans = r.orphans || [];
-  $('#mc-orphan-box').hidden = !orphans.length;
-  $('#mc-orphan-list').innerHTML = orphans
-    .map(
-      (n) => `<div class="mc-row">
-        <div class="mc-main"><div class="mc-sub">${esc(n)}</div></div>
-        <div class="mc-acts">${btnHTML('deleteBackup', { name: n }, t('删除'), ' danger')}</div>
-      </div>`
-    )
-    .join('');
+function renderMachines() {
+  $('#mc-list').innerHTML = state.machines.map((m) => machineRowHTML(m, state.machinesOpen === m.dir)).join('');
 }
 
 async function onMachineAction(e) {
   const btn = e.target.closest('.mc-act');
   if (!btn) return;
-  const { act, id, file, name } = btn.dataset;
-  const m = state.machines.find((x) => x.machineId === id);
+  const { act, id, dir, name } = btn.dataset;
+  const m = state.machines.find((x) => x.dir === dir || (id && x.machineId === id));
   if (act === 'rename') {
     if (m) openRenameModal(m);
+    return;
+  }
+  // 展开/收起是纯本机动作，不碰云端也不弹确认框
+  if (act === 'toggle') {
+    state.machinesOpen = state.machinesOpen === dir ? '' : dir;
+    renderMachines();
+    return;
+  }
+  // 恢复：先把机器档案收掉，再开恢复弹窗 —— 两个弹窗叠在一起会挡住确认按钮
+  if (act === 'useBackup') {
+    closeModal('modal-machines');
+    await openRestore({ dir, name });
     return;
   }
   let ask = null;
@@ -1974,31 +2009,24 @@ async function onMachineAction(e) {
       danger: false,
     };
     run = () => api.invoke('sync:adoptMachine', { machineId: id });
-  } else if (act === 'forget') {
+  } else if (act === 'deleteMachine') {
+    const n = Number(btn.dataset.n) || 0;
     ask = {
-      title: t('移出列表'),
-      message: t('把这台机器从档案列表里移出？\n它的备份包留在云端不动，需要时还能手动恢复。'),
-      confirmLabel: t('移出'),
-    };
-    run = () => api.invoke('sync:forgetMachine', { file });
-  } else if (act === 'purge') {
-    // 把具体文件名写进确认框：只说「最近那一份」用户没法核对，而这删的是云端唯一的一份
-    const target = btn.dataset.backup;
-    ask = {
-      title: t('删除档案与备份'),
-      message: target
-        ? tf('把这台机器从档案列表里移出，并从云端永久删除它的备份：\n{n}\n这个操作不可撤销。', { n: target })
-        : t('把这台机器从档案列表里移出，并连它最近那一份备份一起从云端永久删除？\n这个操作不可撤销。'),
+      title: t('删除机器'),
+      // 删的是一个目录，确认框里把份数说清楚：这份数点下去就再也数不出来了
+      message: n
+        ? tf('从云端永久删除这台机器的整个目录，连同里面 {n} 份备份？\n这个操作不可撤销。', { n })
+        : t('从云端永久删除这台机器的整个目录？\n这个操作不可撤销。'),
       confirmLabel: t('删除'),
     };
-    run = () => api.invoke('sync:forgetMachine', { file, deleteBackups: true });
+    run = () => api.invoke('sync:deleteMachine', { dir });
   } else if (act === 'deleteBackup') {
     ask = {
       title: t('删除备份'),
       message: tf('从云端永久删除 {n}？\n这个操作不可撤销。', { n: name }),
       confirmLabel: t('删除'),
     };
-    run = () => api.invoke('sync:deleteBackup', { name });
+    run = () => api.invoke('sync:deleteBackup', { dir, name });
   }
   if (!ask || !run) return;
   if (!(await confirmModal(ask))) return;
@@ -2016,20 +2044,26 @@ async function onMachineAction(e) {
 }
 
 $('#mc-list').addEventListener('click', onMachineAction);
-$('#mc-orphan-list').addEventListener('click', onMachineAction);
 $('#btn-mc-machines').addEventListener('click', openMachines);
 
 // 点击「从云端下载」：弹窗先行（瞬间可见）→ 后台只取廉价元数据 → 用户点确认后才真正下载整包
 let restoreSeq = 0;
 
-const RESTORE_FIELDS = ['#rv-host', '#rv-time', '#rv-remote', '#rv-size', '#rv-content', '#rv-source'];
+const RESTORE_FIELDS = ['#rv-machine', '#rv-host', '#rv-time', '#rv-remote', '#rv-size', '#rv-content', '#rv-source'];
+
+// 这一份备份是不是本机的。认领是「恢复时才做的断言」，勾上之后项目级 SKILL 才算数 ——
+// 所以这个判断要跟着勾选框走，不能只看 info.sameMachine（那是勾之前的结论）
+function restoreSameMachine(info) {
+  if (info.sameMachine) return true;
+  const row = $('#rv-adopt-row');
+  return !row.classList.contains('hidden') && $('#rv-adopt').checked;
+}
 
 // 恢复范围：按 Agent 勾选要重建哪些全局 SKILL，默认全选。
-// 旧版备份没有侧车元数据，拿不到 Agent 明细，只能整包恢复（此时不渲染勾选框）。
+// 侧车缺失（上传中断或它已被清理）时拿不到 Agent 明细，只能整包恢复（此时不渲染勾选框）。
 function renderRestoreScope(info) {
   const agents = Array.isArray(info.agents) ? info.agents : [];
   const list = $('#rv-agents');
-  const skip = $('#rv-skip');
   $('#rv-scope').hidden = !agents.length;
   list.innerHTML = agents
     .map(
@@ -2042,14 +2076,31 @@ function renderRestoreScope(info) {
     )
     .join('');
   list.querySelectorAll('.rs-check').forEach((el) => el.addEventListener('change', syncRestoreSelection));
+  renderRestoreNotes(info);
+  syncRestoreSelection();
+}
+
+/**
+ * 范围下面那几行提示。单独拆出来，是因为勾「这就是这台电脑」会改变项目级 SKILL 的归属 ——
+ * 那时只能重画提示，绝不能顺手把上面那组勾选框重建一遍：用户取消掉的 Agent 会被悄悄勾回来。
+ */
+function renderRestoreNotes(info) {
+  const agents = Array.isArray(info.agents) ? info.agents : [];
+  const skip = $('#rv-skip');
   const notes = [];
   const projectCount = Number(info.projectCount) || 0;
-  if (projectCount) notes.push(tf('另有 {n} 个项目 SKILL 不在恢复范围内（随项目仓库走）', { n: projectCount }));
-  // 旧版备份没有 Agent 明细，也就拿不到 ~ 目录声明——只能整包恢复，目录要靠后缀匹配重新映射
-  if (info.detailed && !agents.length) notes.push(t('旧版备份的目录按原机器的用户目录记录，恢复时会自动映射到本机'));
+  // 项目级 SKILL 只在「这份备份是本机的」时才回来：项目路径是机器相关的，别台机器恢复过来的
+  // 一串路径基本全是错的。勾「这就是这台电脑」就是在说「这份备份是本机的」
+  if (projectCount) {
+    notes.push(
+      restoreSameMachine(info)
+        ? tf('另有 {n} 个项目 SKILL 会一并恢复到本机的项目里', { n: projectCount })
+        : tf('另有 {n} 个项目 SKILL 不会恢复：这份备份不是本机的（勾下面的认领可以把它认回来）', { n: projectCount })
+    );
+  }
+  if (info.detailed && !agents.length) notes.push(t('这份备份没有 Agent 明细（上传时侧车没写成功），只能整包恢复'));
   skip.textContent = notes.join('\n');
   skip.hidden = !notes.length;
-  syncRestoreSelection();
 }
 
 function syncRestoreSelection() {
@@ -2062,7 +2113,13 @@ function syncRestoreSelection() {
   $('#btn-restore-confirm').disabled = checks.length > 0 && picked.length === 0;
 }
 
-$('#btn-wd-restore').addEventListener('click', async () => {
+/**
+ * 打开恢复弹窗。
+ * pick 带 { dir, name } = 恢复指定机器的指定一份（机器档案里挑出来的）；
+ * pick 为空 = 先看本机目录里有没有备份：有就用本机最新那份，没有就让用户先挑机器 ——
+ * 不再静默退回「云端最新一条」，那等于替用户决定「你要恢复的就是这台陌生的机器」。
+ */
+async function openRestore(pick = {}) {
   const seq = ++restoreSeq;
   const btn = $('#btn-restore-confirm');
   // 本次弹窗是否已被取消 / 被更新的一次点击取代；过期结果一律丢弃
@@ -2082,29 +2139,63 @@ $('#btn-wd-restore').addEventListener('click', async () => {
       toast(msg, 'err');
     }
   };
-  if (!(await wdSave())) return fail(t('保存失败'));
-
-  const info = await api.invoke('sync:restoreInfo', {});
+  // 这里绝不能 wdSave()：这个入口除了设置页那个按钮，还有总览与机器档案里的「恢复」——
+  // 那两条路上设置表单根本没填过（全是空白），一保存就会把用户配好的 WebDAV 整个抹掉。
+  // 「把刚填的存下来再恢复」是设置页按钮自己的事，见 #btn-wd-restore
+  if (!pick.dir) {
+    const list = await api.invoke('sync:machines');
+    if (stale()) return;
+    const mine = list && list.ok ? list.machines.find((m) => m.self && m.backups.length) : null;
+    if (!mine) {
+      // 本机还没有备份：交给用户挑机器（机器档案里每台都能展开挑副本）
+      restoreSeq++; // 作废这一次，别让后到的结果把弹窗又填回来
+      closeModal('modal-restore');
+      toast(t('本机还没有云端备份 —— 请先选一台机器，再挑它的备份'), '');
+      await openMachines();
+      return;
+    }
+    pick = { dir: mine.dir };
+  }
+  const info = await api.invoke('sync:restoreInfo', { dir: pick.dir, name: pick.name });
   if (stale()) return;
   if (!info.ok) return fail(info.error);
 
+  state.restoreDir = info.dir || '';
   state.restoreName = info.name;
+  state.restoreInfo = info;
   const d = new Date(info.uploadedAt);
+  $('#rv-machine').textContent = [info.machineName || info.hostname || t('（没有档案）'), info.dir].filter(Boolean).join('  ·  ');
   $('#rv-host').textContent = info.hostname || '—';
   $('#rv-time').textContent = info.uploadedAt ? (isNaN(d) ? info.uploadedAt : d.toLocaleString()) : '—';
   $('#rv-remote').textContent = info.remote;
   $('#rv-size').textContent = info.size ? fmtSize(info.size) : '—';
-  $('#rv-content').textContent = info.detailed ? tf('{n} 个 SKILL + config.json', { n: info.entries }) : t('—（旧版备份未附带元数据）');
-  // 备份来源：本机备份过就用自己的那份，否则退回云端最新的一条
-  $('#rv-source').textContent = info.source === 'local' ? t('本机上次备份') : t('云端最新一条（本机尚未备份过）');
-  // 按钮的可用状态由 syncRestoreSelection 决定（全选/未选/旧版无勾选框三种情况都已覆盖）
-  renderRestoreScope(info);
+  $('#rv-content').textContent = info.detailed ? tf('{n} 个 SKILL + config.json', { n: info.entries }) : t('—（这份备份没带元数据）');
+  // 备份来源：本机目录里那份，还是从别的机器挑的
+  $('#rv-source').textContent = info.source === 'local' ? t('本机目录里的备份') : t('另一台机器的备份');
+  // 认领行要先摆好：它会把勾选框重置成未勾选，而下面那段提示要按「勾没勾」来说话 ——
+  // 反过来的话，提示读到的还是上一个弹窗留下的勾选状态
   renderAdoptRow(info);
+  // 按钮的可用状态由 syncRestoreSelection 决定（全选/未选/拿不到勾选框三种情况都已覆盖）
+  renderRestoreScope(info);
   $('#rv-status').textContent = '';
+}
+
+// 设置页里的「从云端下载」：表单就在眼前，先把刚填的存下来再恢复 —— 这是这条入口独有的，
+// 总览 / 机器档案那几条入口不带表单，绝不能走这一步（见 openRestore 里的注释）
+$('#btn-wd-restore').addEventListener('click', async () => {
+  if (!(await wdSave())) return toast(t('保存失败'), 'err');
+  openRestore();
+});
+
+// 恢复弹窗里换一份：收起它，去机器档案里挑（那里能挑机器，也能挑历史副本）
+$('#btn-restore-switch').addEventListener('click', async () => {
+  restoreSeq++; // 让还在飞的那次 restoreInfo 作废，别回来把弹窗重新填一遍
+  closeModal('modal-restore');
+  await openMachines();
 });
 
 // 认领开关：备份来自别的机器时才有可勾的东西（重装系统后就靠它把项目一起认回来）。
-// 旧版备份没有侧车元数据，拿不到对方标识，也就无从认领——那种情况不显示这一行。
+// 拿不到对方标识（侧车没写成功）就无从认领——那种情况不显示这一行。
 //
 // 切显示必须走 .hidden 类，不能用 hidden 属性：.adopt-row 自己声明了 display:grid，
 // 作者样式压过 UA 样式表的 [hidden]{display:none}，元素会一直可见——而 hidden 属性读回来
@@ -2115,10 +2206,19 @@ function renderAdoptRow(info) {
   $('#rv-adopt').checked = false;
   if (!canAdopt) return;
   const label = info.machineName || info.hostname || t('另一台电脑');
-  $('#rv-adopt-text').textContent = tf('这份备份来自「{name}」，不是本机。勾上表示这就是这台电脑（例如刚重装过系统），项目配置与 HOME 之外的目录会一并还原。', {
-    name: label,
-  });
+  $('#rv-adopt-text').textContent = tf(
+    '这份备份来自「{name}」，不是本机。勾上表示这就是这台电脑（例如刚重装过系统），项目配置与它名下的项目 SKILL 会一并还原。',
+    {
+      name: label,
+    }
+  );
 }
+
+// 勾「这就是这台电脑」会改变项目级 SKILL 的归属，上面那段提示得跟着换 —— 否则用户勾完
+// 看到的还是「不会恢复」。只重画提示：整块重画会把用户取消掉的 Agent 又勾回去
+$('#rv-adopt').addEventListener('change', () => {
+  if (state.restoreInfo) renderRestoreNotes(state.restoreInfo);
+});
 
 // 备份包里有 SKILL 落在「本机配置之外的目录」时绝不默认写入 —— 那些路径来自被恢复的那份包，
 // 由它自己决定往哪儿写，等于让外来文件自己发通行证。办法是把具体路径摆给用户看，
@@ -2139,6 +2239,7 @@ async function confirmExternalDirs(prev) {
   if (!ok) return;
   $('#rv-status').textContent = t('正在写入本机配置之外的目录…');
   const again = await api.invoke('sync:restoreApply', {
+    dir: state.restoreDir,
     name: state.restoreName,
     agentIds: state.restoreAgents,
     // 认领在上一轮已经落盘，这一轮不必再传（传了也只是空操作）
@@ -2147,7 +2248,6 @@ async function confirmExternalDirs(prev) {
   });
   if (!again.ok) return toast(again.error || t('恢复失败'), 'err');
   toast(tf('已从云端恢复 {n} 个 SKILL ✓', { n: again.restored }), 'ok');
-  if (again.relocated?.length) toast(tf('{n} 个旧版目录已按本机用户目录重新映射', { n: again.relocated.length }), 'ok');
   await scan();
 }
 
@@ -2157,19 +2257,24 @@ $('#btn-restore-confirm').addEventListener('click', async () => {
   $('#rv-status').textContent = t('正在下载并恢复…');
   try {
     const adoptMachine = !$('#rv-adopt-row').classList.contains('hidden') && $('#rv-adopt').checked;
-    const r = await api.invoke('sync:restoreApply', { name: state.restoreName, agentIds: state.restoreAgents, adoptMachine });
+    const r = await api.invoke('sync:restoreApply', {
+      dir: state.restoreDir,
+      name: state.restoreName,
+      agentIds: state.restoreAgents,
+      adoptMachine,
+    });
     if (!r.ok) {
       $('#rv-status').textContent = '✗ ' + r.error;
       return toast(r.error, 'err');
     }
     toast(tf('已从云端恢复 {n} 个 SKILL ✓', { n: r.restored }), 'ok');
+    if (r.restoredProjects) toast(tf('同时恢复了 {n} 个项目 SKILL ✓', { n: r.restoredProjects }), 'ok');
     if (r.adoptedMachine) {
       await refreshMachine();
       toast(t('已认领这台机器，本机标识已更新 ✓'), 'ok');
     }
-    if (r.relocated?.length) toast(tf('{n} 个旧版目录已按本机用户目录重新映射', { n: r.relocated.length }), 'ok');
-    // 下面两条是设计如此（不算失败），用中性级别，免得跟真正的错误混在一起
-    if (r.skippedProjects) toast(tf('未恢复 {n} 个项目 SKILL（随项目仓库走）', { n: r.skippedProjects }), '');
+    // 下面几条是设计如此（不算失败），用中性级别，免得跟真正的错误混在一起
+    if (r.skippedProjects) toast(tf('未恢复 {n} 个项目 SKILL：这份备份不是本机的（勾「这就是这台电脑」可以认回来）', { n: r.skippedProjects }), '');
     // 这句话负责指路：同类情形下用户可以重新打开弹窗勾「这就是这台电脑」再来一次
     if (r.projectConfigSkipped) {
       toast(

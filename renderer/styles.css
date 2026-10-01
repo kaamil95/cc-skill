@@ -1093,7 +1093,6 @@ select.input {
 .wd-grid { display: grid; grid-template-columns: 76px 1fr; gap: 9px 10px; align-items: center; }
 .wd-grid label { font-size: 12px; color: var(--text-2); }
 /* 可留空的那一项（远程目录）：标签退一档，别和上面三个必填项一样重；说明另占一整行 */
-.wd-grid label.wd-optional { color: var(--text-3); }
 .wd-grid .wd-span { grid-column: 1 / -1; margin-top: -2px; }
 .wd-actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
 
@@ -1197,3 +1196,10 @@ select.input {
 .mc-detail { font-size: 12px; color: var(--text-2); }
 .mc-acts { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
 .mc-act.danger { color: var(--red); }
+
+/* 展开后的备份列表：缩进挂在所属那一行下面，一眼看得出是谁的副本 */
+.mc-backups { margin: -2px 0 8px 14px; padding: 4px 0 4px 12px; border-left: 2px solid var(--hairline-strong); }
+.mc-backup { display: flex; align-items: center; gap: 10px; padding: 4px 6px; border-radius: 6px; font-size: 12px; }
+.mc-backup:hover { background: var(--fill-faint); }
+.mc-backup-time { color: var(--text-2); flex: none; }
+.mc-backup .mc-acts { margin-left: auto; }

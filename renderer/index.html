@@ -288,11 +288,9 @@
             <input id="wd-user" class="input" autocomplete="off" placeholder="账号 / 应用密码专用账号" />
             <label data-i18n="密码">密码</label>
             <input id="wd-pass" type="password" class="input" autocomplete="new-password" placeholder="建议使用服务方签发的应用密码" />
-            <!-- 远程目录是可留空的一项：标签退一档，默认值写在下面的说明里，
-                 别让它跟上面三个必填项一样重 -->
-            <label class="wd-optional" data-i18n="远程目录">远程目录</label>
-            <input id="wd-path" class="input" placeholder="cc-skill-sync" />
-            <div class="hint wd-span" data-i18n="留空即用默认目录 cc-skill-sync（无需以 / 开头）；换一个目录就等于把备份放到云端的另一处。">留空即用默认目录 cc-skill-sync（无需以 / 开头）；换一个目录就等于把备份放到云端的另一处。</div>
+            <!-- 远程目录不再是一个输入项：云端按机器分目录之后，根目录固定为 cc-skill-sync，
+                 用户没有理由再改它 —— 写成说明而不是第三个要填的框 -->
+            <div class="hint wd-span" data-i18n="云端根目录固定为 cc-skill-sync，每台机器在它下面各占一个子目录；多台机器共用一个网盘也不会互相覆盖。">云端根目录固定为 cc-skill-sync，每台机器在它下面各占一个子目录；多台机器共用一个网盘也不会互相覆盖。</div>
           </div>
           <div class="wd-actions">
             <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--text-2)">
@@ -330,8 +328,8 @@
           <div class="wd-actions">
             <button class="btn sm" id="btn-mc-machines" data-i18n="云端机器档案">云端机器档案</button>
           </div>
-          <div class="hint" style="margin-top:8px" data-i18n="机器标识决定「云端哪份备份是本机的」。重装系统后会生成新标识，恢复时勾一下「这就是这台电脑」即可认领回来；机器名只用于显示，随备份上传。">
-            机器标识决定「云端哪份备份是本机的」。重装系统后会生成新标识，恢复时勾一下「这就是这台电脑」即可认领回来；机器名只用于显示，随备份上传。
+          <div class="hint" style="margin-top:8px" data-i18n="机器标识决定云端哪个子目录是本机的。重装系统后会生成新标识，在恢复弹窗里勾一下「这就是这台电脑」即可认领回来，之后备份仍写回原来那个目录；机器名只用于显示，随备份上传。">
+            机器标识决定云端哪个子目录是本机的。重装系统后会生成新标识，在恢复弹窗里勾一下「这就是这台电脑」即可认领回来，之后备份仍写回原来那个目录；机器名只用于显示，随备份上传。
           </div>
         </div>
         </div>
@@ -411,6 +409,7 @@
       <div class="modal-body" style="padding:22px 24px">
         <div class="restore-title"><span class="restore-ico">⚠</span><span data-i18n="从云端恢复">从云端恢复</span></div>
         <div class="restore-grid">
+          <span class="rg-label" data-i18n="来源机器">来源机器</span><span class="rg-val mono" id="rv-machine"></span>
           <span class="rg-label" data-i18n="上传设备">上传设备</span><span class="rg-val mono" id="rv-host"></span>
           <span class="rg-label" data-i18n="上传时间">上传时间</span><span class="rg-val mono" id="rv-time"></span>
           <span class="rg-label" data-i18n="远程路径">远程路径</span><span class="rg-val mono" id="rv-remote"></span>
@@ -431,6 +430,8 @@
         <div class="restore-warn" data-i18n="恢复将覆盖本机同名的全局 SKILL">恢复将覆盖本机同名的全局 SKILL</div>
       </div>
       <div class="modal-foot" style="justify-content:flex-end;gap:10px">
+        <button class="btn" id="btn-restore-switch" data-i18n="换一份…">换一份…</button>
+        <span style="flex:1"></span>
         <button class="btn" data-close="modal-restore" data-i18n="取消">取消</button>
         <button class="btn danger-solid" id="btn-restore-confirm" data-i18n="确认恢复">确认恢复</button>
       </div>
@@ -445,15 +446,11 @@
         <button class="modal-close" data-close="modal-machines">×</button>
       </div>
       <div class="modal-body">
-        <p class="hint" data-i18n="每台在这里备份过的机器一份档案。备份包的归属只能靠档案里的记录得知（包名不带机器标识），所以「删除备份」删的是它记着的那一份；更早的快照由云端保留策略收敛。">
-          每台在这里备份过的机器一份档案。备份包的归属只能靠档案里的记录得知（包名不带机器标识），所以「删除备份」删的是它记着的那一份；更早的快照由云端保留策略收敛。
+        <p class="hint" data-i18n="云端按机器分目录：每台备份过的机器一个子目录，备份包与它那一份信息都在里面。可以直接用别的机器的备份来恢复本机 —— 那只会还原全局 SKILL，项目级的只在恢复本机自己的备份时才回来。">
+          云端按机器分目录：每台备份过的机器一个子目录，备份包与它那一份信息都在里面。可以直接用别的机器的备份来恢复本机 —— 那只会还原全局 SKILL，项目级的只在恢复本机自己的备份时才回来。
         </p>
         <div id="mc-status" class="hint"></div>
         <div id="mc-list"></div>
-        <div id="mc-orphan-box" hidden>
-          <div class="mc-group" data-i18n="未被任何档案引用的备份">未被任何档案引用的备份</div>
-          <div id="mc-orphan-list"></div>
-        </div>
       </div>
       <div class="modal-foot">
         <button class="btn" data-close="modal-machines" data-i18n="关闭">关闭</button>
