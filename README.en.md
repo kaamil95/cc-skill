@@ -43,7 +43,7 @@ Installing one SKILL for every agent means N divergent copies. CC Skill fixes th
 - 🔗 **Link management** — each SKILL detail lists its installed links; view / open / uninstall / add new
 - 🧹 **Merge duplicates** — finds the same SKILL copied into multiple directories and collapses them into "1 canonical copy + N links" (safe delete to Recycle Bin, retry & copy-fallback built in)
 - 🗂 **Project scopes** — register project folders (e.g. `your-repo/.claude/skills`) and move SKILLs between global and project scopes; project installs always use copies (git-safe)
-- 📊 **Dashboard** — counts, per-agent / per-project distribution, recent activity
+- 📊 **Dashboard** — counts, per-agent / per-project distribution, recent activity; missing skill directories are named right on their chips, and the dashboard's "N directories missing" count clicks through to the agent's view
 - ☁️ **WebDAV backup & restore** — bring your own server (坚果云 / Nextcloud / Alist …), one-click snapshot of every physical SKILL, restore to the same directories on any machine
 - 🖥️ **Machine identity & profiles** — the cloud keeps one folder per machine, so how many backups each one has is plain to see; restore / rename / claim / delete a machine. After a fresh OS install, tick "this is this computer" in the restore dialog and project entries plus the project skills under them come back too. Configs can be exported to a file and imported from one
 - 🧾 **Operation log** — every action is recorded in-app and appended to `cc-skill.log` next to the app
@@ -58,7 +58,7 @@ npm start              # dev run
 npm run dist           # portable exe (dist/CC Skill <version>.exe)
 ```
 
-Requirements: Windows 10+ (junction-based linking is NTFS), Node.js 18+.
+Requirements: Windows 10+ (junction-based linking is NTFS) or macOS 12+, Node.js 22+ (for development and testing; the app itself runs on Electron's bundled Node).
 
 > Prebuilt portable exe is attached to each [Release](../../releases).
 
@@ -79,7 +79,7 @@ Settings → WebDAV:
 | Username   | your account                     |
 | Password   | app-specific password            |
 
-Test connection → Backup now → Restore latest. **Saving the config also registers this machine in the cloud** — a freshly configured machine appears in the other machines' lists before its first backup. The WebDAV protocol subset used is `PROPFIND / MKCOL / PUT / GET`, so any standards-compliant server works.
+Test connection → Upload to cloud → Download from cloud. **Saving the config also registers this machine in the cloud** — a freshly configured machine appears in the other machines' lists before its first backup. "Download from cloud" restores this machine's latest backup; when this machine has none, the machine list opens so you can pick one. The machine's own row in **Cloud machine profiles** also keeps a permanent "Back Up Now". The WebDAV protocol subset used is `PROPFIND / MKCOL / PUT / GET`, so any standards-compliant server works.
 
 ### Several machines, one cloud folder
 
