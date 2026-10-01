@@ -550,12 +550,17 @@ function renderGrid() {
     const a = agentById(state.filter);
     sections = [{ title: '', tag: '', dir: '', items: state.view.filter((s) => !s.project && s.allAgentIds.includes(state.filter) && match(s)) }];
     if (a) {
+      // 主进程的 expand 走 path.join（反斜杠），渲染层的 ~ 展开是字符串拼接（正斜杠）——
+      // 直接 === 会把同一目录比成两个，~ 形式的缺失目录就永远标不出来。比之前先收敛分隔符。
+      const normP = (p) => String(p || '').replace(/\\/g, '/');
+      const isMissing = (d) => state.missing.some((m2) => normP(m2.dir) === normP(expand(d)));
       const dirs =
         (a.dirs || [])
           .map((d) => {
-            const missing = state.missing.some((m2) => m2.dir === expand(d));
+            // 不存在的目录直接在芯片上写明，不靠悬停提示 —— 缺了哪个要一眼可见
+            const missing = isMissing(d);
             return `<span class="dir-chip ${missing ? 'warn' : ''}" title="${esc(expand(d))}${missing ? '（' + t('目录不存在，安装时将自动创建') + '）' : ''}">
-            ${missing ? '<span class="warn-ico">⚠</span>' : ''}${esc(d)}<span class="rm cfg-dir-rm" data-dir="${esc(d)}">×</span></span>`;
+            ${missing ? '<span class="warn-ico">⚠</span>' : ''}${esc(d)}${missing ? `<span class="warn-tag">${t('目录不存在')}</span>` : ''}<span class="rm cfg-dir-rm" data-dir="${esc(d)}">×</span></span>`;
           })
           .join('') || `<span class="hint">${t('暂无目录')}</span>`;
       cfgCard = `<div class="agent-block scope-cfg">
@@ -665,7 +670,7 @@ function renderDashboard() {
       return `<div class="dash-row">
         <span class="dot" style="background:${esc(a.color)}"></span>
         <span class="dash-name">${esc(a.name)}</span>
-        <span class="dash-sub">${miss ? `<span class="dash-warn">⚠ ${tf('{n} 个目录缺失', { n: miss })}</span>` : tf('{n} 个目录', { n: (a.dirs || []).length })}</span>
+        <span class="dash-sub">${miss ? `<span class="dash-warn dash-miss" data-agent="${esc(a.id)}" title="${t('点击查看缺失的目录')}">⚠ ${tf('{n} 个目录缺失', { n: miss })} ›</span>` : tf('{n} 个目录', { n: (a.dirs || []).length })}</span>
         <span class="dash-n">${n}</span>
       </div>`;
     })
@@ -758,6 +763,9 @@ function onDashboardClick(e) {
   if (e.target.closest('#btn-dash-machines-refresh')) return reloadMachines();
   if (e.target.closest('#btn-dash-machines-manage') || e.target.closest('.machine-card')) return openMachines();
   if (e.target.closest('#btn-dash-log-more')) return openLogs();
+  // 「N 个目录缺失」点了跳到该 Agent 的视图 —— 缺的目录在那边的芯片上逐个标出
+  const miss = e.target.closest('.dash-miss');
+  if (miss) return setFilter(miss.dataset.agent);
 }
 
 // ------------------------------ 总览：云端机器 --------------------------------

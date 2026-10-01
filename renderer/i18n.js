@@ -272,6 +272,8 @@
     "添加 Agent": "Add Agent",
     "选择一个项目目录，扫描其中的 SKILL": "Pick a project folder to scan its skills",
     "目录不存在，安装时将自动创建": "directory missing; created automatically on first install",
+    "目录不存在": "missing",
+    "点击查看缺失的目录": "Click to see which directories are missing",
     "暂无目录": "No directories yet",
     "Agent": "Agents",
     "单文件 SKILL 暂不支持链接安装": "Single-file skills do not support link install",

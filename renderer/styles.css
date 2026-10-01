@@ -855,8 +855,14 @@ select.input {
 }
 .dir-chip .rm { cursor: pointer; color: var(--text-3); font-size: 13px; padding: 0 2px; border-radius: 3px; }
 .dir-chip .rm:hover { color: var(--red); }
-.dir-chip.warn { box-shadow: 0 0 0 1px var(--orange); }
+.dir-chip.warn { box-shadow: 0 0 0 1px var(--orange); background: var(--warn-soft); }
 .dir-chip .warn-ico { color: var(--orange); font-size: 11px; }
+.dir-chip .warn-tag {
+  color: var(--warn-text); font-size: 10.5px; font-family: var(--font);
+  border-left: 1px solid var(--orange); padding-left: 6px; font-weight: 500;
+}
+.dash-warn.dash-miss { cursor: pointer; }
+.dash-warn.dash-miss:hover { color: var(--warn-strong); text-decoration: underline; }
 .agent-add-dir { display: flex; gap: 8px; margin-top: 10px; }
 .settings-actions { display: flex; gap: 10px; margin-top: 16px; }
 

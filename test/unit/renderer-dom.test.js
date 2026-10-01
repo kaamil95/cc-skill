@@ -300,6 +300,9 @@ test('新加的界面文案都有英文对照（英文环境下不会掉出中�
     '云端根目录固定为 cc-skill-sync，每台机器在它下面各占一个子目录；多台机器共用一个网盘也不会互相覆盖。',
     '本机还没有云端备份 —— 请先选一台机器，再挑它的备份',
     '链路通（{ms} ms），目标返回 HTTP {s}：多为 GitHub 匿名限流（每小时 60 次），在「发现」里填个 Token 即可',
+    // 缺失目录的标记
+    '目录不存在',
+    '点击查看缺失的目录',
   ]) {
     assert.ok(dict.includes(`'${key}':`) || dict.includes(`"${key}":`), 'i18n.js 缺少词条：' + key);
   }
@@ -446,6 +449,22 @@ test('总览每块内容各占一张卡，SKILL 网格仍排在最下面', () =>
   // 机器列表整块只在配了 WebDAV 时出现：没配就没什么可看的
   assert.ok(expr.includes("webdavReady() ? machinesCardHTML() : ''"), '云端机器那块要按 WebDAV 是否配置来决定出不出');
   assert.ok(/\.dash-machines\s*\{/.test(css), '缺机器列表的样式');
+});
+
+test('缺失的目录要指得出是哪一个：芯片写明、总览的缺失数可点进去', () => {
+  // 踩过：总览只报「N 个目录缺失」，缺了哪个全靠悬停提示；芯片上也只有一圈橙框 + ⚠，
+  // 不看提示根本不知道那意味着什么。现在芯片直接写明「目录不存在」，总览的数字可点
+  // 跳到该 Agent 的视图 —— 缺口在那边逐个标出。
+  assert.match(appJs, /class="warn-tag"/, '芯片上要有可见的「目录不存在」标记');
+  assert.match(appJs, /dash-warn dash-miss" data-agent=/, '总览的缺失数要带上 agent id 才点得进去');
+  assert.match(appJs, /if \(miss\) return setFilter\(miss\.dataset\.agent\);/, '点缺失数要跳到对应 Agent 的视图');
+  // 踩过：主进程 expand 用 path.join（反斜杠），渲染层 ~ 展开是拼接（正斜杠），严格 === 比不出
+  // 缺失 —— 默认 Agent 的目录全是 ~ 形式，标记从来没亮过。比之前必须收敛分隔符。
+  assert.match(appJs, /const normP = \(p\) => String\(p \|\| ''\)\.replace\(\/\\\\\/g, '\/'\);/, '路径比对要先统一分隔符');
+  assert.ok(!appJs.includes('state.missing.some((m2) => m2.dir === expand(d))'), '不能再拿未归一的路径做严格相等');
+  assert.match(css, /\.dir-chip\.warn\s*\{[^}]*warn-soft/, '缺失芯片要有底色，光一圈橙框不够显眼');
+  assert.match(css, /\.dir-chip \.warn-tag\s*\{/, '缺 warn-tag 样式');
+  assert.match(css, /\.dash-warn\.dash-miss\s*\{[^}]*cursor: pointer/, '可点的缺失数要有手型光标');
 });
 
 test('云端档案按需拉取：问过一次就不再问，失败也算问过', () => {
