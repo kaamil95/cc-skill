@@ -307,14 +307,17 @@ svg.i { flex: none; display: block; }
   -webkit-app-region: drag;
 }
 #topbar button, #topbar input, .search, .win-controls { -webkit-app-region: no-drag; }
-.win-controls { display: flex; align-self: stretch; margin-left: auto; }
+/* 窗口按钮收成竖直居中的小正方形：顶栏 60px 高，原先 44px 宽的按钮通栏拉满，
+   悬停高亮会被拉成上下全是留白的长条，很难看 */
+.win-controls { display: flex; align-items: center; gap: 3px; margin-left: auto; padding-right: 8px; }
 
 /* macOS：窗口按钮交给系统原生红绿灯（main.js 的 trafficLightPosition），
    自绘的一套隐藏，并给左上角留出红绿灯的位置 */
 body[data-platform='darwin'] .win-controls { display: none; }
 body[data-platform='darwin'] #topbar { padding-left: 84px; }
 .wc-btn {
-  width: 44px; border: none; background: none;
+  width: 32px; height: 32px; border-radius: 7px;
+  border: none; background: none;
   color: var(--text-2);
   display: flex; align-items: center; justify-content: center;
   cursor: pointer;
@@ -517,7 +520,7 @@ body[data-platform='darwin'] #topbar { padding-left: 84px; }
   border-left: 3px solid var(--accent);
   border-radius: 2px;
 }
-.card--link::before { border-left: 3px dashed var(--hairline-strong); }
+.card--link::before { border-left: 3px dashed color-mix(in srgb, var(--accent) 55%, transparent); }
 .card--dangling::before { border-left: 3px dashed var(--warn-text); }
 .card-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .card-name { flex: 1; min-width: 0; font-size: 14px; font-weight: 600; letter-spacing: -0.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -530,9 +533,17 @@ body[data-platform='darwin'] #topbar { padding-left: 84px; }
   background: var(--fill-soft); color: var(--text-2);
 }
 /* 本体是实心徽章，链接是虚线描边 —— 两者原本是同一个 accent 蓝底 🔗 徽章，
-   除了一个「×N」什么也分不出来。带描边的徽章靠收窄内边距保持和实心的一样高。 */
+   除了一个「×N」什么也分不出来。带描边的徽章靠收窄内边距保持和实心的一样高。
+   链接徽章用 accent 淡底 + accent 文字 + accent 虚线描边：和灰色的「单文件」徽章、
+   实心的「本体」徽章一眼拉开，扫一眼就知道这张卡是链接进来的。 */
 .card-type.canon { background: var(--accent); color: var(--on-accent); }
-.card-type.link { background: transparent; border: 1px dashed var(--hairline-strong); color: var(--text-2); padding: 0.5px 6px; }
+.card-type.link {
+  background: var(--accent-soft);
+  border: 1px dashed color-mix(in srgb, var(--accent) 55%, transparent);
+  color: var(--link);
+  font-weight: 600;
+  padding: 0.5px 6px;
+}
 .card-type.warn { background: var(--warn-soft); color: var(--warn-text); }
 .card-desc {
   color: var(--text-2);
@@ -558,12 +569,13 @@ body[data-platform='darwin'] #topbar { padding-left: 84px; }
 }
 .chip .dot { width: 7px; height: 7px; border-radius: 50%; }
 .chip.proj-chip { background: var(--purple-soft); color: var(--purple-text); font-weight: 500; }
-/* 只通过链接出现的 Agent：虚线芯片 + 🔗 顶掉彩色圆点（圆点在这里会谎称文件就在那儿） */
+/* 只通过链接出现的 Agent：accent 虚线芯片 + 🔗 顶掉彩色圆点（圆点在这里会谎称文件就在那儿） */
 .chip.link-chip {
-  background: transparent;
-  border: 1px dashed var(--hairline-strong);
-  color: var(--text-3);
-  padding: 1.5px 7px 1.5px 6px;
+  background: var(--accent-soft);
+  border: 1px dashed color-mix(in srgb, var(--accent) 55%, transparent);
+  color: var(--link);
+  font-weight: 600;
+  padding: 0.5px 6px 0.5px 5px;
 }
 /* 路径：占位常驻、hover 才淡入。必须常驻——否则 hover 时卡片变高，会把同一行
    其他卡片一起顶下去（grid 行高取最高者），鼠标划过整片区域都在跳 */
