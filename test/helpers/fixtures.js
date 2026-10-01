@@ -62,22 +62,30 @@ function restoreHomeEnv(saved) {
   }
 }
 
-/** 用系统自带的 Compress-Archive 打包，刻意不复用 src/zip.js——测试的输入不该由被测代码生成 */
+/**
+ * 用系统自带工具打包，刻意不复用 src/zip.js——测试的输入不该由被测代码生成。
+ * Windows 用 Compress-Archive；macOS / Linux runner 上没有 powershell.exe，用 zip 命令
+ * （Release 流程曾在这里翻车：夹具只写了 Windows 的路子，dmg 构建在 npm test 就断了）。
+ */
 function zipDir(srcDir, zipPath) {
   const { execFileSync } = require('child_process');
-  const ps = (s) => String(s).replace(/'/g, "''");
-  execFileSync(
-    'powershell.exe',
-    [
-      '-NoProfile',
-      '-NonInteractive',
-      '-ExecutionPolicy',
-      'Bypass',
-      '-Command',
-      `Compress-Archive -Path '${ps(path.join(srcDir, '*'))}' -DestinationPath '${ps(zipPath)}' -Force`,
-    ],
-    { windowsHide: true }
-  );
+  if (process.platform === 'win32') {
+    const ps = (s) => String(s).replace(/'/g, "''");
+    execFileSync(
+      'powershell.exe',
+      [
+        '-NoProfile',
+        '-NonInteractive',
+        '-ExecutionPolicy',
+        'Bypass',
+        '-Command',
+        `Compress-Archive -Path '${ps(path.join(srcDir, '*'))}' -DestinationPath '${ps(zipPath)}' -Force`,
+      ],
+      { windowsHide: true }
+    );
+  } else {
+    execFileSync('zip', ['-r', '-q', zipPath, '.'], { cwd: srcDir });
+  }
   return zipPath;
 }
 
