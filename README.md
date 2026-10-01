@@ -148,7 +148,7 @@ cc-skill-sync/
 ## 常见问题
 
 **支持 macOS / Linux 吗？**
-界面本身跨平台，但链接安装依赖 NTFS junction。欢迎 PR 增加 unix symlink 支持。
+macOS 12+ 已支持：链接安装用系统 symlink，[Release](../../releases) 提供 dmg。Linux 的 symlink 逻辑已就绪、代码层面可运行，只是还没有打包发布，欢迎 PR。
 
 **我的数据在哪？**
 Windows 便携版：配置与日志都在 exe 同级目录（整个目录拷走即可，`%APPDATA%` 下的旧配置首次启动会自动迁移）；macOS：`~/Library/Application Support/CC Skill/`。测试 / 多实例可用 `CC_SKILL_DATA_DIR` 指到别处。本机文件不会永久删除——删除一律进回收站；但**云端备份的删除是永久的**（WebDAV 没有回收站），所以「云端机器档案」里删备份、删机器都会在确认框里写明要删掉几份。
@@ -158,10 +158,20 @@ Windows 便携版：配置与日志都在 exe 同级目录（整个目录拷走�
 
 ## 路线图
 
-- [ ] 定时 / 自动备份
-- [ ] macOS 与 Linux symlink 支持
-- [ ] SKILL 市场 / 从 Git 一键安装
-- [ ] 多语言界面
+已完成：
+
+- [x] 定时 / 自动备份 —— 启动 / 每日 / 每周可选，内容有变化才上传
+- [x] macOS symlink 支持 —— Release 附带 dmg；Windows 继续用 junction
+- [x] SKILL 市场 / 从 Git 一键安装 —— 「发现」：搜索仓库、粘贴链接、加载索引
+- [x] 多语言界面 —— 中文 / English，可跟随系统或手动选择
+
+接下来：
+
+- [ ] SKILL 一键更新：记住「发现」里装过的 SKILL 的来源与版本，一键检查更新
+- [ ] Linux 打包（AppImage / deb）—— symlink 逻辑已就绪，缺打包发布
+- [ ] 恢复 / 合并前的内容对比：合并重复或恢复备份前先看差异再决定
+- [ ] 备份包加密：WebDAV 目录万一被共享，备份内容也不被直接读走
+- [ ] 更多云后端：本地目录 / GitHub 仓库 / S3，不止 WebDAV
 
 ## 参与贡献
 

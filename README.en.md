@@ -112,7 +112,7 @@ Settings → Machine & config lets you rename machines (your own name travels wi
 ## FAQ
 
 **Is it Mac/Linux compatible?**
-The UI runs anywhere Electron runs, but linking relies on NTFS junctions. PRs for `symlink` support on unix are welcome.
+macOS 12+ is supported: linking uses the system `symlink` and a dmg ships with each [Release](../../releases). Linux's symlink logic is in place and the code runs, but there is no packaged build yet — PRs welcome.
 
 **Where is my data?**
 Windows portable: config and log both live next to the exe (copy the whole folder and you are done; an old `%APPDATA%` config is migrated on first launch). macOS: `~/Library/Application Support/CC Skill/`. Tests / multiple instances can point `CC_SKILL_DATA_DIR` elsewhere. Local files are never deleted permanently — removals go to the Recycle Bin; **cloud backups are** (WebDAV has no recycle bin), which is why deleting a backup, or a whole machine, from "Cloud machine profiles" states how many it will take in its confirmation.
@@ -122,10 +122,20 @@ It is stored in the local config file in plain text (same as most similar tools)
 
 ## Roadmap
 
-- [ ] Scheduled / auto backup
-- [ ] macOS & Linux symlink support
-- [ ] SKILL marketplace / one-click install from Git
-- [ ] Multi-language UI
+Done:
+
+- [x] Scheduled / auto backup — startup / daily / weekly, and it only uploads when the content actually changed
+- [x] macOS symlink support — a dmg ships with each Release; Windows keeps using junctions
+- [x] SKILL marketplace / one-click install from Git — Discover: search repositories, paste links, load an index
+- [x] Multi-language UI — 中文 / English, following the system or picked manually
+
+Next:
+
+- [ ] One-click SKILL updates: remember where each installed-from-Discover SKILL came from and at what version, check for updates in one click
+- [ ] Linux packaging (AppImage / deb) — the symlink logic is ready; only the packaged build is missing
+- [ ] Diff before merge / restore: see what changes before collapsing duplicates or restoring a backup
+- [ ] Backup encryption: if the WebDAV folder is ever shared, the archive contents stay unreadable
+- [ ] More cloud backends: local folder / GitHub repository / S3, not just WebDAV
 
 ## Contributing
 
