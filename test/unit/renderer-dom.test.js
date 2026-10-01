@@ -525,15 +525,14 @@ test('机器档案：一台机器一行，恢复 / 备份列表 / 删除都写�
   assert.ok(!appJs.includes("t('删除档案与备份')"), '它已被「删除机器（整个目录）」取代');
 });
 
-test('总览的「立即备份」不走设置页，也不经过确认框', () => {
-  // 快捷按钮的意义就在少一步；备份不删除任何东西（最多挤掉 10 份之外的旧份，那是既定策略），
-  // 不属于「要先确认的破坏性操作」。它必须用已保存的配置 —— wdSave 的门已经保证它在设置页
-  // 之外是空操作，这里再钉一层
-  assert.match(appJs, /id="btn-dash-backup"[^>]*>\$\{t\('立即备份'\)\}/, '总览机器卡头部要有它');
-  assert.match(appJs, /#btn-dash-backup'\)\)?[^;]*quickBackup\(e\.target\.closest\('#btn-dash-backup'\)\)/, '要接进总览的点击代理');
-  assert.match(appJs, /function quickBackup\(btn\)/, '处理函数要有');
-  assert.ok(!/function quickBackup\(btn\)[\s\S]{0,900}await wdSave\(\)/.test(appJs), '不许存设置表单 —— 那条路上表单是空白的');
-  assert.match(appJs, /function quickBackup\(btn\)[\s\S]{0,900}invalidateMachines\(\)/, '备份完成要刷新总览的机器列表');
+test('「立即备份」长在本机那一行，机器列表这个管理界面不掺和', () => {
+  // 备份是「本机」自己的动作，不是机器列表的管理动作 —— 所以外层卡头只有刷新 / 管理，
+  // 备份按钮进机器档案里本机那一行
+  assert.match(appJs, /if \(m\.self\) acts\.push\(btnHTML\('backup', \{ dir: m\.dir \}, t\('立即备份'\), ' primary'\)\)/, '本机行要有「立即备份」');
+  assert.ok(!appJs.includes('id="btn-dash-backup"'), '总览卡头不该再有备份按钮');
+  assert.match(appJs, /function runBackup\(btn\)/, '处理函数要有');
+  assert.ok(!/function runBackup\(btn\)[\s\S]{0,900}await wdSave\(\)/.test(appJs), '不许存设置表单 —— 那条路上表单是空白的');
+  assert.match(appJs, /if \(act === 'backup'\) \{\s*if \(await runBackup\(btn\)\) await loadMachines\(\);/, '备份完成要原地重拉，新副本立刻可见');
 });
 
 test('恢复弹窗：先说清这份备份是哪台机器的、哪一份', () => {

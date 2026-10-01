@@ -755,7 +755,6 @@ function renderDashboard() {
 
 /** 总览上的点击：机器列表的刷新 / 管理与「查看全部日志」都走事件代理（卡片会整块重画） */
 function onDashboardClick(e) {
-  if (e.target.closest('#btn-dash-backup')) return quickBackup(e.target.closest('#btn-dash-backup'));
   if (e.target.closest('#btn-dash-machines-refresh')) return reloadMachines();
   if (e.target.closest('#btn-dash-machines-manage') || e.target.closest('.machine-card')) return openMachines();
   if (e.target.closest('#btn-dash-log-more')) return openLogs();
@@ -772,7 +771,6 @@ function machinesCardHTML() {
       <h3>${t('云端机器')}</h3>
       <span class="hint" id="dash-machines-hint">${esc(machinesHeadHint())}</span>
       <div class="dash-head-acts">
-        <button class="btn sm primary" id="btn-dash-backup">${t('立即备份')}</button>
         <button class="btn sm" id="btn-dash-machines-refresh">${t('刷新')}</button>
         <button class="btn sm" id="btn-dash-machines-manage">${t('管理')}</button>
       </div>
@@ -857,24 +855,20 @@ function invalidateMachines() {
 }
 
 /**
- * 总览上的「立即备份」：不走设置页，直接用已保存的配置上传一次。
- * 备份不删除任何东西（最多把 10 份之外的旧份挤掉，且那是既定策略），所以不用确认框 ——
- * 快捷的意义就在这儿，点完给 toast 即可。
+ * 备份动作本体：按钮在期间禁用并显示「备份中…」，结果用 toast 回音。
+ * 入口在机器档案里本机那一行 —— 备份是「本机」的动作，不是机器列表这个管理界面的事。
+ * 备份不删除任何东西（最多把 10 份之外的旧份挤掉，且那是既定策略），所以不用确认框。
  */
-async function quickBackup(btn) {
+async function runBackup(btn) {
   if (!webdavReady()) return toast(t('请先在设置里填写 WebDAV 配置'), 'err');
   const label = btn.textContent;
   btn.disabled = true;
   btn.textContent = t('备份中…');
   try {
     const r = await api.invoke('sync:backup');
-    if (r.ok) {
-      toast(tf('{name}（{count} 个 SKILL / {size}）', { name: r.name, count: r.count, size: fmtSize(r.size) }), 'ok');
-      toast(t('已备份到云端 ✓'), 'ok');
-      invalidateMachines();
-    } else {
-      toast(t('备份失败：') + r.error, 'err');
-    }
+    if (!r.ok) return toast(t('备份失败：') + r.error, 'err');
+    toast(tf('{name}（{count} 个 SKILL / {size}）', { name: r.name, count: r.count, size: fmtSize(r.size) }), 'ok');
+    return true;
   } finally {
     btn.disabled = false;
     btn.textContent = label;
@@ -1970,6 +1964,8 @@ function machineBackupsHTML(m) {
 
 function machineRowHTML(m, open) {
   const acts = [];
+  // 「立即备份」是本机那一行专属的：备份是这台机器自己的动作，别人的行没有它
+  if (m.self) acts.push(btnHTML('backup', { dir: m.dir }, t('立即备份'), ' primary'));
   // 恢复：本机那份回来的是「全局 + 项目」，别人的只回全局 —— 提示语在确认弹窗里说清楚
   if (m.backups.length) acts.push(btnHTML('useBackup', { dir: m.dir, name: m.latest.name }, t('恢复'), ' primary'));
   if (m.backups.length) acts.push(btnHTML('toggle', { dir: m.dir }, open ? t('收起') : tf('备份 {n} 份', { n: m.backups.length })));
@@ -2018,6 +2014,11 @@ async function onMachineAction(e) {
   if (act === 'toggle') {
     state.machinesOpen = state.machinesOpen === dir ? '' : dir;
     renderMachines();
+    return;
+  }
+  // 备份是本机那一行专属的动作：完成后原地重拉，新副本立刻出现在展开的列表里
+  if (act === 'backup') {
+    if (await runBackup(btn)) await loadMachines();
     return;
   }
   // 恢复：先把机器档案收掉，再开恢复弹窗 —— 两个弹窗叠在一起会挡住确认按钮
