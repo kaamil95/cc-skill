@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-10-03
+
+### 新增
+
+- **SKILL 本体迁移**：详情弹窗新增「迁移到…」——装错目录、项目级提升为全局、全局降级进项目，一次搬完。同卷原子搬走；跨卷复制后原件进回收站（绝不硬删）；指向本体的所有链接自动重新指向新家，不留失效链接；可选「原位置留下链接」让原目录继续可用；同名冲突支持自动重命名 / 覆盖；链接与失效条目没有本体，迁移按钮禁用
+- **迁移的「部分成功」语义**：跨卷搬运遇原件被占用时，目标副本转正为本体并如实提示「原件保留，请手动清理」——不再谎报失败，也不会让重试堆积重复副本
+- **目标选择器「已安装」两档标记**：候选目录里，装了它的标琥珀「已安装」，其余标灰色「已在其他目录安装」——安装前一眼看清哪里有、哪里没有；SKILL 市场详情与「安装到其他 Agent」弹窗同时生效
+- **迁移弹窗的源目录保留显示但禁用**：标「当前所在目录」——列表分组结构完整可见，不再靠对账发现少了哪个
+- **多目录 Agent 视图按目录分段**：一个 Agent 挂多个目录时（如 ZCode 同时挂 `~/.zcode/skills` 与共享 `~/.agents/skills`），SKILL 列表一段一目录，每张卡的物理位置一目了然
+
+### English
+
+#### Added
+- **Move a SKILL's canonical copy between directories**: a "Move to…" action in the detail dialog relocates a skill — fix wrong-directory installs, promote project-level skills to global, or demote global ones into a project. Same-volume moves are atomic renames; cross-volume moves copy first and send the original to the Recycle Bin (never a hard delete); every link pointing at the skill is re-pointed to its new home automatically, so no link is left dangling; an optional "leave a link at the original location" keeps the old directory working; same-name conflicts support auto-rename / overwrite; link and broken entries have no canonical copy, so their move button is disabled
+- **Partial-success semantics for moves**: when a cross-volume move can't remove the locked original, the copy at the target becomes the canonical one and the app says so — "the original was kept, clean it up manually" — instead of reporting a false failure and piling up duplicate copies on retry
+- **Two-tier "installed" badges in the target picker**: directories that already have the skill show an amber "Installed" badge, the rest a muted "Installed in another directory" — see where a skill lives before installing; applies to both the SKILL market detail dialog and "Install to other agents"
+- **The source directory stays visible (disabled) in the move dialog**, labeled "Current location" — the grouping structure remains complete instead of hiding the row and making you reconcile the list
+- **Multi-directory agent views are sectioned by directory**: when one agent reads several directories (e.g. ZCode over `~/.zcode/skills` and the shared `~/.agents/skills`), the skill list gets one section per directory, so every card's physical location is obvious
+
 ## [0.0.3] - 2026-10-03
 
 ### 新增
