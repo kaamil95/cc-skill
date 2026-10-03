@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.0.3] - 2026-10-03
 
-### 新增 Added
+### 新增
 
 - **SKILL 市场改版：一个搜索框，聚合所有来源。** skills.sh / SkillsMP / GitHub / SkillHub 四来源并行检索，来源只是结果行上的徽章——不再让用户先挑站点。列表秒出（只等站点接口），描述按行异步回填，行带首字母头像、装机量/星标指标与来源徽章
 - **分类浏览与排序**：合集 / 开发 / 运维 / 测试 / 文档 / AI·ML / 前端 / 后端 / 安全（走 SkillHub 目录），支持热门 / 星标最多 / 名称 A-Z；默认按装机量降序——最多人用的排最前
@@ -20,7 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **目标目录下拉重组**：共用目录（如 `~/.agents/skills`）单独成组「全局 · 共享目录」，行内叠色点 + 全部 Agent 名字 + 路径，不再伪装成多个不同目标
 - 打包体积：极限压缩 + 语言包裁剪（仅 zh-CN / en-US）
 
-### 修复 Fixed
+### 修复
 
 - **切页崩溃**：市场页的异步回调（检索 / 描述回填 / 安装）在页面被切走后写 DOM，抛「Cannot set properties of null (setting 'textContent')」——所有市场 DOM 写入点先确认页面还在，回来时按 state 恢复
 - **zip-slip**：解压前解析 zip 中央目录，拒绝 `../`、绝对路径、盘符与反斜杠穿越条目（含 zip64）——市场 zip 直链与本地导入都受保护
@@ -46,7 +46,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Avatar failures are no longer cached forever (a network blip used to stick for the whole run); the detail cache is bounded (it was unbounded, holding full SKILL.md bodies); cache-cap operators unified; name sort locale pinned
 - Repo mode now says "N in total, showing the first 20" when the listing is truncated
 
+
 ## [0.0.2] - 2026-10-01
+
+### 新增
+
+- **云端备份按机器分目录。** 每台机器在云端有自己的子目录（`<可读名>-<机器标识>`），内含 `machine.json` 机器档案、各备份归档与配套 `<archive>.json` 内容清单（列表不下载即可预览内容）；保留策略按目录各自保留最近 10 份，**机器列表会列出每台机器名下的全部备份**——可回滚到昨天，也可直接从另一台机器整包恢复。**恢复别家机器的备份只还原全局 SKILL**（项目路径不跨机器）；恢复本机自己的备份则会连项目级 SKILL 一起还原（目的地必须落在本机已登记的项目内）。删除机器即删除其整个目录（确认框明示数量）
+- **保存 WebDAV 配置即注册机器档案**——新机器配好服务器立刻出现在所有机器的列表里，不必等到第一次备份
+- **恢复不再替用户做主**：优先用本机自己的最新备份；本机没有则打开机器列表让你选——不再默默抓「云端最新」把别家机器的备份当成默认选项
+- **设置页去掉远程目录输入**：云端根目录固定为 `cc-skill-sync`，留一行说明；旧配置里的自定义目录仍然兼容
+- **机器身份与云端档案**：重装系统后在恢复弹窗勾选「这就是这台电脑」即可认领回原机器标识，项目配置随之回来；home 之外的目录会列出清单二次确认后才写入。机器可改名（本机名随备份上云，给别家机器起的名字只是本地别名）。**云端机器档案面板**列出每台备份过的机器，可恢复 / 改名 / 认领 / 连目录整体删除（每一步都先确认）
+- **配置文件导出 / 导入回归**（设置 → 机器与配置）：导出默认不含 WebDAV 密码；导入先预览将替换的内容再确认——Agent 与项目做替换、外观偏好做合并，机器标识绝不进文件
+- **发版自动化**：打 `v*` tag 触发 Release 工作流，双平台构建并挂到 GitHub Release；tag 与 package.json 版本号强校验，发版说明取自 CHANGELOG 对应小节
+- **四套主题 + 自选强调色**（设置 → 主题）：浅色 / 深色 / 护眼 / 高对比；全部颜色改走 CSS 变量，强调色由 `--accent` 派生，选择缓存到 localStorage 首帧前套用
+- **发现 SKILL**：从 GitHub 搜索仓库、粘贴仓库 / 子目录 / zip 直链或加载索引 JSON——下载解压、列出其中所有 SKILL 并预览，勾选后装进任意 Agent 目录；安装第三方 SKILL 前必现来源与风险确认
+- **网络代理**（设置 → 网络）：跟随系统 / 直连 / 手动（支持凭据与不走代理列表）+ 连接测试；经 Electron session 生效，WebDAV 同步与市场都遵守
+- **窗口级错误韧性**：SKILL 内相对链接的导航守卫、页面加载失败 / 渲染进程崩溃自动恢复、无菜单窗口的 F5 / Ctrl+R / DevTools、启动失败显示重载按钮、致命错误卡片
+- 内部：注入式 HTTP 层（超时 + 下载上限，主进程注入 `net.fetch`）；链接解析 / 索引归一 / 归档取回拆分为 `src/market.js`、`src/nav.js`、`src/applog.js`
+
+### 变更
+
+- **缺失目录点名标出**：总览的「N 个目录缺失」可点击跳转到对应 Agent，芯片上直接写「目录不存在」；顺带修了 `~` 形路径因分隔符不一致永远比对不上的老问题
+- **备份不再携带 WebDAV 密码**（曾以明文随每个归档旅行）；恢复地址或用户名与本地不一致时清空本地密码，绝不把密码带去别人文件的地址
+- **备份包不能再指定落点**：恢复只写入本机配置在用、或用户刚在清单里确认过的目录——伪造备份包（WebDAV 目录可写即可伪造）无法再把文件写到任意路径并删除原内容；含 `..` 或非绝对路径的声明按脏数据丢弃
+- 机器认领失败不再留下别人的机器标识（失败路径回滚）；旧备份无机器标识时跳过认领而不是中止整个恢复
+- 删除机器的确认明示将删除多少份备份；「永久删除」的 README 表述改为如实描述（本地进回收站，云端彻底删除）
+- 安装弹窗默认并首选**「创建链接（单副本）」**；单文件 SKILL 与项目目录内（git 仓库）自动回退副本并说明原因
+- 技能弹窗去重：「链接」页不再把当前条目伪装成独立条目；「+ 安装链接」与「复制到 Agent…」合并为一个「安装到其他 Agent…」
+- **目标目录下拉改为自绘列表**：Agent 色点 + 名字在左、目录灰字在右、多 Agent 共读的目录标「共用」、项目各自分组；支持方向键 / Enter / Esc / 点外部关闭
+- SKILL 卡片一眼区分**本体与链接**：本体实线轨 + 「本体 · N 链接」徽章，链接虚线轨 + 🔗 徽章；Agent 视图按视角呈现（在 Claude Code 下把经由链接访问的 SKILL 显示为链接），从 Agent 视图删除只删该 Agent 的条目，不再连带清空共用的本体
+- 总览与卡片重设计：去掉与工具栏重复的操作行、总览改为单分组容器、卡片悬停显露路径与操作
+- `src/webdav.js` 改走注入式 HTTP 层——全局 fetch 无视代理，配置了代理也形同虚设
+- 窗口背景跟随主题（创建时 + 运行中经 `win:setBackground`）
+
+### 修复
+
+- 封死备份包指定落点的最后两条路：`~` 形目的地（`~/.ssh` / `~/.aws` 同样在家目录里）必须过与绝对路径相同的闸门；项目级目的地必须形如项目 SKILL 目录且属于本机已登记项目——顺带修了认领机器后需恢复两次的老问题
+- **CI 自建立以来一直是红的**：Node 20 没有 glob 支持导致测试跑不起来 + 两个集成测试依赖 TEMP 位置假设——CI 与 mac 构建改用 Node 22，测试自持 `os.homedir()`
+- 本机恢复不再跳过 home 之外的目录（自定义目录如 `D:\AI\skills`）；同时保留防线防止外来绝对路径借「在配置里」混入
+- **删除链接不再清空本体**：Electron 44 内置 Node 的 `fs.rmSync(recursive)` 会穿透 Windows junction 删掉目标内容——链接卸载改走 detach reparse point 的 `removePath`，并加了回归测试
+- scan 失败渲染错误卡片而非空壳；补上通用 `.hidden` 规则（市场弹窗三面板曾同时显示）；确认弹窗不再被后续弹窗盖住；市场预览点击不再报 `EISDIR`
+
+### English
+
+
 
 ### Added
 - **Backups are organised per machine.** The cloud used to be a flat pile: every machine's `cc-skill-backup-*.zip` in one directory, plus a global `latest.json` and a `host-<id>.json` profile per machine. The only thing that said whose a backup was was the profile record, which recorded just *one* name — so "how many backups does this machine have" was unknowable, the retention policy needed a special case ("the newest one per machine is never deleted, or a machine that rarely backs up silently loses its only copy to a busier neighbour"), and a restore could only pick between "the one my profile points at" and "the newest overall". Each machine now gets its own subdirectory under the remote directory, named `<readable-slug>-<full-machine-id>` — readable in the provider's web UI, and carrying the id in the name so a lost `machine.json` still says which machine it is. Inside it: `machine.json` (who this machine is — renaming rewrites this rather than moving the folder, and a machine renamed after claiming still lands back in the original folder), the archives, and a `<archive>.json` sidecar per backup so the list can show each one's contents without downloading it. Retention is now per folder (the last 10 each), and **the machine list shows every backup a machine holds**, so you can pick any of them — roll back to yesterday's, or restore from another machine entirely. **Restoring another machine's backup brings back global skills only**; project paths are machine-specific, so a set of paths restored from elsewhere is mostly wrong. Restoring *this* machine's own backup now restores the project-level skills too, which it never did: they were skipped unconditionally, even for a backup taken here. Their destination has to sit inside a project this machine has registered — the archive saying which project it belongs to does not count, the same rule the global skills already followed. Deleting a machine deletes its whole folder and every backup in it (the confirmation states how many), and the separate "remove from list" and "unreferenced backups" states are gone: with one folder per machine they only ever produced folders nothing could attribute. Two things were removed with the flat layout, since neither had ever been used: reading the old root-level files, and the remapping of absolute paths declared by pre-2019-era archives (the one path rule that trusted the archive's own declarations rather than this machine's config)
@@ -140,6 +183,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `build.files` now includes `src/` and `ipc-channels.js`, which the packaged app needs to start — guarded by a test that walks the require graph
 
 ## [0.0.1] - 2026-09-14
+
+首个公开发布。
+
+### 新增
+
+- **统一扫描**：跨 Claude Code / Codex / OpenClaw / ZCode / Qoder 目录发现 SKILL（含共享的 `~/.agents/skills` 与单文件 SKILL）；侧栏按 Agent / 项目计数
+- **SKILL 详情**：Markdown 预览、源码编辑保存、文件清单
+- **随处安装**：复制到任意 Agent，或安装为 NTFS **junction 链接**——所有 Agent 共享一份实体，改动处处即时生效；链接可查看 / 打开 / 卸载
+- **合并重复**：识别复制到多处的同一 SKILL，收敛为「1 本体 + N 链接」；识别跨范围重复（全局 ⇄ 项目）并以保留副本内容同步其余；回收站删除 + 重试与副本回退
+- **项目级管理**：登记项目文件夹，管理其 `.claude / .agents / .zcode / .codex / .qoder` 技能目录；全局 ⇄ 项目双向安装（项目内一律副本，防误提交 git）
+- **总览仪表盘**：统计磁贴、Agent / 项目分布与目录健康、最近动态、快捷操作；分组列表 + 行内搜索
+- **WebDAV 备份恢复**：自带服务器（坚果云 / Nextcloud / Alist…），兼容各种斜杠风格，支持时自动建目录、不支持时引导手动创建，401/403 有友好提示
+- **自动备份**：启动 / 每日 / 每周；内容 hash 去重，没变化不重复上传；云端保留最近 10 份
+- **操作日志**：应用内记录每个动作（面板、未读错误角标、点错误 toast 直达日志），同步落盘 `cc-skill.log`；捕获未处理异常
+- **自定义 Agent 与目录**：任意 Agent + 自有技能目录；home 相对路径以 `~` 形存储并自愈
+- 其余：配置导入导出、WebDAV 设置同步、`CC_SKILL_DATA_DIR` 数据目录隔离、滚动 `config.backup.json`、macOS 风格中文界面与无边框窗口
+
+### English
+
+
 
 First public release. 项目的第一个对外版本，此前为内部迭代。
 
