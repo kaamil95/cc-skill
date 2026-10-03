@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.3] - 2026-10-03
+
+### 新增 Added
+
+- **SKILL 市场改版：一个搜索框，聚合所有来源。** skills.sh / SkillsMP / GitHub / SkillHub 四来源并行检索，来源只是结果行上的徽章——不再让用户先挑站点。列表秒出（只等站点接口），描述按行异步回填，行带首字母头像、装机量/星标指标与来源徽章
+- **分类浏览与排序**：合集 / 开发 / 运维 / 测试 / 文档 / AI·ML / 前端 / 后端 / 安全（走 SkillHub 目录），支持热门 / 星标最多 / 名称 A-Z；默认按装机量降序——最多人用的排最前
+- **少量多次的分页**：每次展示 30 条，先本地展开（零网络）、耗尽才翻页；skills.sh 接口不支持服务端分页（实测确认），整表缓存在主进程按 20 条/页切片，翻页不再空手而回
+- **从 GitHub 安装**：搜索按钮右侧新增独立按钮，弹窗里粘贴仓库 / `/tree/` 子目录 / zip 直链，读取后进入勾选页；弹窗内「Token 设置」一键直达设置页
+- **GitHub Token 迁到 设置 → SKILL 市场**：说明改为「大多数场景用不上它」——面向高级用户的可选项；代理测试改测 github.com 主站，只报链路通断，不再劝用户填 Token
+- **「同名已存在」标记**：搜索结果行与安装勾选页都会标出本机已装过的 SKILL（琥珀徽章，只提示不拦截——仍可装到其他 Agent）
+- **目标目录下拉重组**：共用目录（如 `~/.agents/skills`）单独成组「全局 · 共享目录」，行内叠色点 + 全部 Agent 名字 + 路径，不再伪装成多个不同目标
+- 打包体积：极限压缩 + 语言包裁剪（仅 zh-CN / en-US）
+
+### 修复 Fixed
+
+- **切页崩溃**：市场页的异步回调（检索 / 描述回填 / 安装）在页面被切走后写 DOM，抛「Cannot set properties of null (setting 'textContent')」——所有市场 DOM 写入点先确认页面还在，回来时按 state 恢复
+- **zip-slip**：解压前解析 zip 中央目录，拒绝 `../`、绝对路径、盘符与反斜杠穿越条目（含 zip64）——市场 zip 直链与本地导入都受保护
+- 头像失败不再被永久缓存（此前负缓存会粘住整个运行期，网络恢复也不重试）；详情缓存封顶（此前无上限，条目含 SKILL.md 全文）；各缓存容量判定统一；名称排序固定 locale
+- 仓库模式清单超过 20 个 SKILL 时明示「共 N 个，仅列出前 20 个」
+- 代理测试改测 github.com 主站：API 端点对匿名请求按出口 IP 限流，走共享代理时动辄 403，会被误报成「连接失败」
+
+### English
+
+#### Added
+- **The SKILL market is now one search box aggregating every source.** skills.sh / SkillsMP / GitHub / SkillHub are queried in parallel; a source is just a badge on the row — no picking a site first. Lists render in about a second, descriptions backfill per row, rows carry first-letter avatars, install/star metrics and source badges
+- **Categories and sorts**: collections / devops / testing / docs / AI·ML / frontend / backend / security (via the SkillHub catalog), plus popular / most-stars / name sorts; the default order is installs-descending
+- **Incremental paging**: 30 rows at a time — expand locally first (zero network), fetch the next page only when local stock runs out; the skills.sh API has no server-side paging (verified), so its full response is cached in the main process and served 20 rows per page
+- **Install from GitHub**: a dedicated button next to Search opens a dialog for repo / `/tree/` subdirectory / direct zip links; a "Token settings" shortcut jumps straight to Settings
+- **GitHub Token moved to Settings → SKILL Market**, worded as "most users never need this" — an option for advanced users; the proxy test now probes github.com (the homepage, not the IP-rate-limited API) and only reports link health, never nagging about tokens
+- **"Same name exists" badge** on both the result rows and the install pick list (amber, advisory only — you can still install into another agent)
+- **Target-directory dropdown reworked**: shared directories (e.g. `~/.agents/skills`) get their own "Global · Shared directories" group with stacked colour dots, every agent's name and the path
+- Packaging: maximum compression + locale trim (zh-CN / en-US only)
+
+#### Fixed
+- **Crash on page switch**: async market callbacks (search / description backfill / install) wrote to DOM after the page was replaced — every market DOM write now checks the page is still alive and recovers from state on return
+- **zip-slip**: the zip central directory is parsed before extraction; `../`, absolute-path, drive-letter and backslash traversal entries are refused (zip64 included) — covers both market zip links and local import
+- Avatar failures are no longer cached forever (a network blip used to stick for the whole run); the detail cache is bounded (it was unbounded, holding full SKILL.md bodies); cache-cap operators unified; name sort locale pinned
+- Repo mode now says "N in total, showing the first 20" when the listing is truncated
+
 ## [0.0.2] - 2026-10-01
 
 ### Added
