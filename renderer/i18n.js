@@ -109,6 +109,28 @@
     '取消': 'Cancel',
     '开始复制': 'Install',
 
+    // ---- 迁移本体弹窗 ----
+    '迁移到…': 'Move to…',
+    '迁移 SKILL 本体': 'Move SKILL',
+    '将迁移 {name}（整目录）': 'Move {name} (folder)',
+    '将迁移 {name}（单文件）': 'Move {name} (single file)',
+    '原位置留下链接（原目录继续可用）': 'Leave a link at the original location (that directory keeps working)',
+    '迁移 = 本体搬走：原位置的 SKILL 会消失，指向它的链接由主进程自动重新指向新位置。':
+      'Move = the canonical copy relocates: it disappears from the original location, and links pointing at it are re-pointed to the new home automatically.',
+    '开始迁移': 'Start move',
+    '；但原位置删除失败（目录可能被占用），原件保留，请手动清理':
+      '; the original could not be removed (it may be in use) and was kept — clean it up manually',
+    '已迁移到 {p}': 'Moved to {p}',
+    '，{n} 个链接已重新指向新位置': ', {n} link(s) re-pointed',
+    '，原位置已留链接': ', link left at the original location',
+    '链接或失效条目没有本体可迁移': 'Links and broken entries have nothing to move — use "Install to other agents…" instead',
+    '目标目录与当前所在目录相同': 'Target directory is the same as the current one',
+    // ---- 目标选择器「已安装」徽章 ----
+    '已安装': 'Installed',
+    '已在其他目录安装': 'Installed in another directory',
+    '当前所在目录': 'Current location',
+    '该目录已有同名 SKILL': 'A skill with the same name already exists in this directory',
+
     // ---- 新建弹窗 ----
     '新建': 'New',
     'SKILL 名称（英文短横线，如 my-skill）': 'Skill name (kebab-case, e.g. my-skill)',

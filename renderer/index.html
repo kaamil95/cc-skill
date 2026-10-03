@@ -123,6 +123,7 @@
         <button class="btn" id="btn-detail-open" data-i18n="打开所在文件夹">打开所在文件夹</button>
         <div class="foot-right">
           <button class="btn danger" id="btn-detail-delete" data-i18n="删除">删除</button>
+          <button class="btn" id="btn-detail-move" data-i18n="迁移到…">迁移到…</button>
           <button class="btn primary" id="btn-detail-copy" data-i18n="安装到其他 Agent…">安装到其他 Agent…</button>
         </div>
       </div>
@@ -156,6 +157,36 @@
       <div class="modal-foot">
         <button class="btn" data-close="modal-copy" data-i18n="取消">取消</button>
         <button class="btn primary" id="btn-copy-go" data-i18n="开始复制">开始复制</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 迁移 SKILL 本体：与「安装到其他 Agent」的复制/链接不同，本体真的搬走。
+       勾「原位置留链接」= 搬家 + 原目录经 junction 继续可用 -->
+  <div class="modal-overlay hidden" id="modal-move">
+    <div class="modal">
+      <div class="modal-head">
+        <div class="modal-title" data-i18n="迁移 SKILL 本体">迁移 SKILL 本体</div>
+        <button class="modal-close" data-close="modal-move">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-row" id="move-src"></div>
+        <label class="form-label" data-i18n="目标目录（全局 Agent 目录或项目目录）">目标目录（全局 Agent 目录或项目目录）</label>
+        <div id="move-dir" class="picker"></div>
+        <label class="radio-row" id="move-leave-label" style="margin-top:6px">
+          <input type="checkbox" id="move-leave" />
+          <span data-i18n="原位置留下链接（原目录继续可用）">原位置留下链接（原目录继续可用）</span>
+        </label>
+        <p class="hint" id="move-hint" style="margin-top:6px"></p>
+        <label class="form-label" data-i18n="目标已存在同名 SKILL 时">目标已存在同名 SKILL 时</label>
+        <div class="radio-row">
+          <label><input type="radio" name="move-conflict" value="rename" checked /> <span data-i18n="自动重命名（如 xxx-2）">自动重命名（如 xxx-2）</span></label>
+          <label><input type="radio" name="move-conflict" value="overwrite" /> <span data-i18n="覆盖">覆盖</span></label>
+        </div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn" data-close="modal-move" data-i18n="取消">取消</button>
+        <button class="btn primary" id="btn-move-go" data-i18n="开始迁移">开始迁移</button>
       </div>
     </div>
   </div>

@@ -105,6 +105,13 @@ const toTilde = (p) => {
   return rest ? '~/' + rest : '~';
 };
 const fmtSize = (n) => (n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(1) + ' KB' : (n / 1048576).toFixed(1) + ' MB');
+const normPath = (p) =>
+  String(p || '')
+    .replace(/[\\/]+/g, '/')
+    .replace(/\/+$/, '')
+    .toLowerCase();
+// 已存在同名 SKILL 的目录集合（归一化绝对路径）：目标选择器拿它给候选标「已安装」
+const dupDirsFor = (name) => new Set(state.skills.filter((s) => s.name === name).map((s) => normPath(expand(s.parentDir))));
 const isProjectTarget = (v) => {
   const norm = String(v || '')
     .replace(/[\\/]+/g, '/')
@@ -551,7 +558,27 @@ function renderGrid() {
     }
   } else {
     const a = agentById(state.filter);
-    sections = [{ title: '', tag: '', dir: '', items: state.view.filter((s) => !s.project && s.allAgentIds.includes(state.filter) && match(s)) }];
+    const items = state.view.filter((s) => !s.project && s.allAgentIds.includes(state.filter) && match(s));
+    // 多目录的 Agent：SKILL 列表按目录分段，一段一目录 —— 不然共用目录混在 Agent 自己的
+    // 目录里，看不出哪张卡物理上落在哪个目录。单目录 / 目录缺失时不分段，保持原样。
+    if ((a?.dirs || []).length > 1) {
+      const normP = (p) => String(p || '').replace(/\\/g, '/');
+      const buckets = new Map();
+      for (const s of items) {
+        const key = normP(expand(viewedEntry(s, state.filter).parentDir));
+        if (!buckets.has(key)) buckets.set(key, []);
+        buckets.get(key).push(s);
+      }
+      sections = (a.dirs || []).map((d) => ({ title: d, tag: '', dir: d, items: buckets.get(normP(expand(d))) || [] })).filter((sec) => sec.items.length);
+      // 兜底：条目的 parentDir 不在该 Agent 的任何已登记目录里（理论上不该发生），
+      // 单独成段挂在最后，绝不能静默丢卡
+      const known = new Set(sections.map((sec) => normP(expand(sec.dir))));
+      for (const [k, arr] of buckets) {
+        if (!known.has(k)) sections.push({ title: k, tag: '', dir: k, items: arr });
+      }
+    } else {
+      sections = [{ title: '', tag: '', dir: '', items }];
+    }
     if (a) {
       // 主进程的 expand 走 path.join（反斜杠），渲染层的 ~ 展开是字符串拼接（正斜杠）——
       // 直接 === 会把同一目录比成两个，~ 形式的缺失目录就永远标不出来。比之前先收敛分隔符。
@@ -935,6 +962,11 @@ function openDetail(s, entry) {
   // 页脚那个按钮就是唯一的「装到别处」入口：安装弹窗里本来就能选复制还是链接，
   // 页签里再放一个默认选链接的按钮，只是同一个弹窗的第二个门
   $('#btn-detail-copy').textContent = s.project ? t('提取到全局…') : t('安装到其他 Agent…');
+  // 迁移只对本体有意义：链接条目 / 失效链接没有可搬的东西，禁用并说明原因
+  const movable = !seen.linked && !seen.dangling;
+  const btnMove = $('#btn-detail-move');
+  btnMove.disabled = !movable;
+  btnMove.title = movable ? '' : t('链接或失效条目没有本体可迁移');
   const hint = $('#detail-hint');
   if (seen.dangling) {
     hint.className = 'link-hint warn';
@@ -1158,6 +1190,7 @@ $('#btn-detail-open').addEventListener('click', () => {
 // 不该把别的 Agent 正在共用的实体一起删了
 $('#btn-detail-delete').addEventListener('click', () => deleteSkill(state.detailEntry || state.detail, true));
 $('#btn-detail-copy').addEventListener('click', () => openCopyModal(state.detail));
+$('#btn-detail-move').addEventListener('click', () => openMoveModal(state.detail));
 
 async function deleteSkill(s, closeAfter = false) {
   let msg;
@@ -1224,7 +1257,16 @@ function targetGroups() {
 
 const pickerValue = (el) => el.dataset.value || '';
 
-function pickerFaceHTML(o) {
+// 选择器里的「已安装」小徽章：目标目录已存在同名 SKILL 时渲染（下拉项与收起后的按钮同构）
+// 「已安装」：这个目录里就有它；「已在其他目录安装」：本机装过但不在这里 ——
+// 两档一起看，一眼分出「哪里有、哪里没有」，不会把没装当成漏标
+const dupBadge = (el, o) => {
+  if (!el || !el._dupDirs || !el._dupDirs.size) return '';
+  if (el._dupDirs.has(normPath(expand(o.value)))) return `<span class="mk-dup" title="${t('该目录已有同名 SKILL')}">${t('已安装')}</span>`;
+  return `<span class="mk-dup dim">${t('已在其他目录安装')}</span>`;
+};
+
+function pickerFaceHTML(o, el) {
   if (!o) return `<span class="picker-dir">${esc(t('（没有可用的目标目录）'))}</span>`;
   // 共用目录：叠点 + 全部 Agent 名字，路径靠右兜底——「谁在用」一眼可数
   if (o.shared) {
@@ -1233,21 +1275,24 @@ function pickerFaceHTML(o) {
       <span class="opt-dots">${o.agents.map((a) => `<span class="dot" style="background:${esc(a.color)}"></span>`).join('')}</span>
       <span class="picker-agent">${esc(names)}</span>
       <span class="picker-dir" title="${esc(o.dir)}">${esc(shortPath(o.dir))}</span>
+      ${dupBadge(el, o)}
     </span>`;
   }
   return `<span class="picker-face">
       ${o.color ? `<span class="dot" style="background:${esc(o.color)}"></span>` : ''}
       <span class="picker-agent">${esc(o.agent)}</span>
       <span class="picker-dir" title="${esc(o.dir)}">${esc(shortPath(o.dir))}</span>
+      ${dupBadge(el, o)}
     </span>`;
 }
 
-function fillTargetPicker(el, preferValue) {
-  const groups = targetGroups();
+function fillTargetPicker(el, preferValue, groups = targetGroups(), dupDirs = null) {
+  // dupDirs：已存在同名 SKILL 的目录集合（归一化绝对路径）——命中的候选标「已安装」
+  el._dupDirs = dupDirs || null;
   el._groups = groups;
   el._opts = groups.flatMap((g) => g.items);
   el.innerHTML = `<button type="button" class="picker-btn" aria-haspopup="listbox" aria-expanded="false"></button>`;
-  const wanted = preferValue && el._opts.some((o) => o.value === preferValue) ? preferValue : (el._opts[0] || {}).value;
+  const wanted = preferValue && el._opts.some((o) => o.value === preferValue && !o.disabled) ? preferValue : (el._opts.find((o) => !o.disabled) || {}).value;
   setPickerValue(el, wanted);
   el.querySelector('.picker-btn').onclick = (e) => {
     e.stopPropagation();
@@ -1268,7 +1313,11 @@ function fillTargetPicker(el, preferValue) {
 function setPickerValue(el, value) {
   el.dataset.value = value || '';
   const btn = el.querySelector('.picker-btn');
-  if (btn) btn.innerHTML = pickerFaceHTML(el._opts.find((o) => o.value === value));
+  if (btn)
+    btn.innerHTML = pickerFaceHTML(
+      el._opts.find((o) => o.value === value),
+      el
+    );
   // 让调用方能在选中项变化时做点事（安装弹窗靠它按目标目录调整安装方式）。
   // fillTargetPicker 初始化时会调到这里，那时 _onPick 还没挂上，所以不会误触发。
   if (el._onPick) el._onPick(value);
@@ -1310,19 +1359,21 @@ function pickerOptHtml(el) {
   return (o) => {
     if (o.shared) {
       const names = o.agents.map((a) => a.name).join(' · ');
-      return `<button type="button" class="picker-opt shared" role="option" data-value="${esc(o.value)}"
+      return `<button type="button" class="picker-opt shared" role="option" data-value="${esc(o.value)}"${o.disabled ? ' disabled' : ''}
           aria-selected="${o.value === pickerValue(el)}" title="${esc(names)}">
           <span class="opt-dots">${o.agents.map((a) => `<span class="dot" style="background:${esc(a.color)}"></span>`).join('')}</span>
           <span class="picker-agent">${esc(names)}</span>
           <span class="picker-dir" title="${esc(o.dir)}">${esc(shortPath(o.dir))}</span>
+          ${dupBadge(el, o)}
         </button>`;
     }
-    return `<button type="button" class="picker-opt" role="option" data-value="${esc(o.value)}"
+    return `<button type="button" class="picker-opt" role="option" data-value="${esc(o.value)}"${o.disabled ? ' disabled' : ''}
           aria-selected="${o.value === pickerValue(el)}">
           ${o.color ? `<span class="dot" style="background:${esc(o.color)}"></span>` : ''}
           <span class="picker-agent">${esc(o.agent)}</span>
           <span class="picker-dir" title="${esc(o.dir)}">${esc(shortPath(o.dir))}</span>
           ${o.tag ? `<span class="picker-tag">${esc(o.tag)}</span>` : ''}
+          ${dupBadge(el, o)}
         </button>`;
   };
 }
@@ -1350,7 +1401,7 @@ function openPicker(el, focusIdx) {
     el.querySelector('.picker-btn').focus();
   };
   pickerPop.onkeydown = (e) => {
-    const opts = [...pickerPop.querySelectorAll('.picker-opt')];
+    const opts = [...pickerPop.querySelectorAll('.picker-opt:not([disabled])')];
     const cur = opts.findIndex((o) => o === document.activeElement);
     if (e.key === 'Escape') {
       // 只关下拉，别让 Esc 继续冒泡到 document —— 那里有个「关掉所有弹窗」的处理器，
@@ -1368,8 +1419,8 @@ function openPicker(el, focusIdx) {
       document.activeElement?.click();
     }
   };
-  // 弹层里的方向键要能直接落上去，所以先给一个可聚焦元素
-  const opts = [...pickerPop.querySelectorAll('.picker-opt')];
+  // 弹层里的方向键要能直接落上去，所以先给一个可聚焦元素（禁用项不可聚焦，跳过）
+  const opts = [...pickerPop.querySelectorAll('.picker-opt:not([disabled])')];
   const sel = opts.findIndex((o) => o.getAttribute('aria-selected') === 'true');
   const start = focusIdx === 0 ? 0 : focusIdx === -1 ? opts.length - 1 : sel >= 0 ? sel : 0;
   opts[start]?.focus();
@@ -1387,7 +1438,7 @@ function openCopyModal(s) {
     tf(s.type === 'folder' ? '将安装 {name}（整目录）' : '将安装 {name}（单文件）', { name: esc(s.name) }) +
     (fromProject ? ` <span class="chip proj-chip">${esc(s.project.name)}</span>` : '');
   const prefer = fromProject ? ((agentById(s.agentIds[0]) || {}).dirs || [])[0] : null;
-  fillTargetPicker($('#copy-dir'), prefer);
+  fillTargetPicker($('#copy-dir'), prefer, undefined, dupDirsFor(s.name));
 
   // 默认「创建链接」：一份实体、多 Agent 共用是这个应用的主推用法，复制出 N 份各自发散的
   // 副本正是它要解决的问题。两种情况回落到「复制副本」：
@@ -1458,6 +1509,68 @@ async function doInstall(s, forceCopy) {
     toast(t('目标已存在同名 SKILL，请选择覆盖或自动重命名'), 'err');
   } else {
     toast(t('操作失败：') + (r.error || ''), 'err');
+  }
+}
+
+// --------------------------- 迁移本体 ----------------------------------------
+// 与「安装到其他 Agent」的区别：本体真的搬走，而不是复制/链接一份、原件不动。
+// 源所在目录保留在候选里但禁用（标「当前所在目录」）：迁移到原地没有意义，
+// 但直接藏掉会让列表少一组，用户要靠对账才能发现少了哪个——问过（真机截图反馈）。
+function openMoveModal(s) {
+  $('#move-src').innerHTML =
+    tf(s.type === 'folder' ? '将迁移 {name}（整目录）' : '将迁移 {name}（单文件）', { name: esc(s.name) }) +
+    (s.project ? ` <span class="chip proj-chip">${esc(s.project.name)}</span>` : '');
+  // 源所在目录禁用而非移除。expand 后归一化再比：~ 形式、大小写、分隔符差异都不该算成不同目录
+  const srcKey = normPath(expand(s.parentDir));
+  const groups = targetGroups().map((g) => ({
+    ...g,
+    items: g.items.map((o) => (normPath(expand(o.value)) === srcKey ? { ...o, disabled: true, tag: t('当前所在目录') } : o)),
+  }));
+  const firstEnabled = groups.map((g) => g.items.find((o) => !o.disabled)).find(Boolean)?.value;
+  fillTargetPicker($('#move-dir'), firstEnabled, groups);
+  // 留链接只对目录型可行（junction 仅限目录）；单文件隐藏选项
+  $('#move-leave-label').style.display = s.type === 'folder' ? '' : 'none';
+  $('#move-leave').checked = false;
+  $('#move-hint').textContent = t('迁移 = 本体搬走：原位置的 SKILL 会消失，指向它的链接由主进程自动重新指向新位置。');
+  openModal('modal-move');
+  $('#btn-move-go').onclick = () => doMove(s);
+}
+
+async function doMove(s) {
+  const btn = $('#btn-move-go');
+  btn.disabled = true;
+  try {
+    const r = await api.invoke('skill:move', {
+      srcPath: s.absPath,
+      type: s.type,
+      destDir: pickerValue($('#move-dir')),
+      folderName: s.folder,
+      onConflict: $('input[name=move-conflict]:checked').value,
+      leaveLink: s.type === 'folder' && $('#move-leave').checked,
+    });
+    if (!r.ok) {
+      if (r.reason === 'exists') toast(t('目标已存在同名 SKILL，请选择覆盖或自动重命名'), 'err');
+      else if (r.reason === 'same-dir') toast(t('目标目录与当前所在目录相同'), 'err');
+      else toast(t('迁移失败：') + (r.error || r.reason || ''), 'err');
+      return;
+    }
+    let msg = tf('已迁移到 {p}', { p: shortPath(r.dest) });
+    if (r.rePointed) msg += tf('，{n} 个链接已重新指向新位置', { n: r.rePointed });
+    if (r.leftLink) msg += t('，原位置已留链接');
+    let ttype = 'ok';
+    if (r.partial === 'src-locked') {
+      // 半成功：副本已在目标就位、原件没能进回收站。必须刷新列表让用户看到双副本现状，
+      // 否则界面还停在旧状态，重试只会再堆一份副本
+      msg += t('；但原位置删除失败（目录可能被占用），原件保留，请手动清理');
+      ttype = 'err';
+    }
+    toast(msg, ttype);
+    // 迁移后旧条目的 key 不复存在，详情弹窗里指向的是已失效的条目，两个弹窗一起收
+    closeModal('modal-move');
+    closeModal('modal-detail');
+    await scan();
+  } finally {
+    btn.disabled = false;
   }
 }
 
@@ -3057,7 +3170,7 @@ async function mkOpenDetail(i) {
   $('#mkd-desc').textContent = v.description || t('暂无描述');
   $('#mkd-files').textContent = '';
   $('#mkd-github').classList.toggle('hidden', !v.url);
-  fillTargetPicker($('#mkd-target'));
+  fillTargetPicker($('#mkd-target'), null, undefined, dupDirsFor(v.name));
   openModal('modal-mk-detail');
   if (v.owner) {
     const img = document.createElement('img');

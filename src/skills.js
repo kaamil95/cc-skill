@@ -376,6 +376,112 @@ function createSkill({ destDir, folder, name, description, agentId }) {
   return { ok: true, dest, skillMdPath: md };
 }
 
+// 归一化后按大小写不敏感比较路径：Windows 上 A:\a 与 a:/A 是同一个目录，
+// 「迁移到原地」这类等价判断必须先统一分隔符再比，否则漏判
+function normCase(p) {
+  return path
+    .resolve(String(p || ''))
+    .replace(/[\\/]+/g, '/')
+    .replace(/\/+$/, '')
+    .toLowerCase();
+}
+
+// 迁移 SKILL 本体到另一个目录。与 copySkill 的「复制一份、原件不动」相反：本体真的搬走。
+// 链接体系下本体搬家会让所有指向它的链接失效，所以搬家前先找出入站链接，搬完一律重指向
+// 新家；leaveLink 时再在原位置补一个链接，原目录继续可用。
+async function moveSkill({ srcPath, type, destDir, folderName, onConflict, leaveLink }, { trashItem }) {
+  const src = expand(srcPath);
+  const dd = expand(destDir);
+  if (!src || !dd) return { ok: false, reason: 'invalid' };
+  // 同目录没有迁移可言：dest 会与 src 完全重合（渲染层已把源目录从候选里过滤掉，这里是防御）
+  if (normCase(path.dirname(src)) === normCase(dd)) return { ok: false, reason: 'same-dir' };
+  let st;
+  try {
+    st = fs.lstatSync(src);
+  } catch (_) {
+    return { ok: false, reason: 'missing' };
+  }
+  // 链接条目没有本体：搬走链接只会让唯一副本丢失一个入口，防御渲染层漏判
+  if (st.isSymbolicLink()) return { ok: false, reason: 'is-link' };
+  // 目标路径与冲突策略，与 copySkill 同构
+  let dest = type === 'file' ? path.join(dd, folderName + '.md') : path.join(dd, folderName);
+  if (fs.existsSync(dest)) {
+    if (onConflict === 'overwrite') {
+      // 目标可能是别人建的链接：走 removePath，别顺着它把链接背后的内容删了
+      removePath(dest);
+    } else if (onConflict === 'rename') {
+      let i = 2;
+      const tryName = (n) => (type === 'file' ? path.join(dd, n + '.md') : path.join(dd, n));
+      while (fs.existsSync(tryName(`${folderName}-${i}`))) i++;
+      dest = tryName(`${folderName}-${i}`);
+    } else {
+      return { ok: false, reason: 'exists', dest };
+    }
+  }
+  fs.mkdirSync(dd, { recursive: true });
+  // 入站链接在搬家前找齐：此时旧路径还是实体，scanAll 不会把它算成链接。
+  // linkTarget 是 realpath 解析的，源也取 realpath 再比，避免 macOS /var → /private/var 这类前缀差异漏判
+  let srcReal = src;
+  try {
+    srcReal = fs.realpathSync(src);
+  } catch (_) {
+    /* 拿原路径比 */
+  }
+  const inbound = scanAll().skills.filter((s) => s.linked && normCase(s.linkTarget) === normCase(srcReal));
+  // 同卷 fs.renameSync 原子搬走；跨卷（EXDEV）复制后原件进回收站，绝不 rmSync 硬删
+  let moved = false;
+  try {
+    fs.renameSync(src, dest);
+    moved = true;
+  } catch (_) {
+    /* EXDEV 或被占用，走复制兜底 */
+  }
+  if (!moved) {
+    if (type === 'folder') fs.cpSync(src, dest, { recursive: true });
+    else fs.copyFileSync(src, dest);
+    const attempt = async () => {
+      try {
+        return (await trashItem(src)) === true;
+      } catch (_) {
+        return false;
+      }
+    };
+    let trashOk = await attempt();
+    if (!trashOk && fs.existsSync(src)) {
+      // Windows 上 trashItem 偶发 false 但实际已移入回收站：是否成功以磁盘实况为准
+      await new Promise((r) => setTimeout(r, 450));
+      trashOk = await attempt();
+    }
+    // 原件进不了回收站（目录被占用）：副本已在目标就位，迁移按「部分成功」收尾——
+    // 绝不在错误路径删数据（回滚副本会误伤 overwrite 情形下目标原有的内容），
+    // 副本转正为本体，入站链接照常重指向新家，原件留给用户手动清理
+  }
+  const partial = !moved && fs.existsSync(src) ? 'src-locked' : null;
+  const realDest = fs.realpathSync(dest);
+  // 入站链接重指向：摘掉旧 junction 重建到新家；单个失败只跳过，不阻塞其他链接的修复
+  let rePointed = 0;
+  for (const l of inbound) {
+    try {
+      removePath(l.absPath);
+      fs.symlinkSync(realDest, l.absPath, LINK_TYPE);
+      rePointed++;
+    } catch (_) {
+      /* 单个链接修复失败不阻塞迁移本身 */
+    }
+  }
+  // 原位置留链接：本体搬走后原目录经 junction 继续可用（junction 仅限目录，单文件建不了）
+  let leftLink = false;
+  if (leaveLink && type === 'folder') {
+    try {
+      fs.symlinkSync(realDest, src, LINK_TYPE);
+      leftLink = true;
+    } catch (_) {
+      /* 建不了链接不影响迁移本身 */
+    }
+  }
+  return { ok: true, dest, rePointed, leftLink, partial };
+}
+
 // 比较两个技能文件夹的 SKILL.md 是否一致（合并重复时提示用户）
 function compareSkills({ pathA, pathB }) {
   const read = (p) => {
@@ -443,5 +549,6 @@ module.exports = {
   copySkill,
   createSkill,
   compareSkills,
+  moveSkill,
   trashSkill,
 };

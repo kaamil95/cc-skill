@@ -14,6 +14,7 @@ const IPC_CHANNELS = [
   'skill:files',
   'skill:readRef',
   'skill:copy',
+  'skill:move',
   'skill:trash',
   'skill:create',
   'skill:compare',

@@ -747,6 +747,8 @@ select.input {
 .picker-opt:focus-visible { background: var(--fill); }
 .picker-opt[aria-selected='true'] { background: var(--accent-soft); }
 .picker-opt[aria-selected='true'] .picker-agent { color: var(--accent); }
+/* 禁用项（如迁移弹窗里的「当前所在目录」）：不可选，但保留在列表里让结构完整可见 */
+.picker-opt:disabled { opacity: 0.55; cursor: not-allowed; }
 .picker-opt .dot { flex: none; width: 8px; height: 8px; border-radius: 50%; }
 .picker-tag {
   flex: none; padding: 1px 6px; border-radius: 5px;
@@ -1180,6 +1182,11 @@ select.input {
   flex: none; margin-left: 8px; padding: 2px 8px; border-radius: 6px;
   font-size: 10.5px; font-weight: 600;
   background: var(--warn-soft); color: var(--warn-text);
+}
+/* 「已在其他目录安装」：提示性弱一档，别跟「这个目录里就有」抢眼 */
+.mk-dup.dim {
+  font-weight: 500;
+  background: var(--fill-soft); color: var(--text-3);
 }
 /* 回到顶部：固定在右下角的圆形按钮，滚过一屏才出现 */
 .mk-top {

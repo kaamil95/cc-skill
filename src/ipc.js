@@ -38,6 +38,7 @@ const {
   copySkill,
   createSkill,
   compareSkills,
+  moveSkill,
   trashSkill,
 } = require('./skills');
 const { unpackZip } = require('./zip');
@@ -104,6 +105,10 @@ function registerIpcHandlers({ getWindow, appDir, userData, applyProxy }) {
     return { ...ref, ...readSkill(ref.path) };
   });
   handle('skill:copy', (args) => copySkill(args));
+  // 迁移本体：源路径、目标目录与冲突策略同 skill:copy；trashItem 注入方式也一致（回收站，不硬删）
+  handle('skill:move', ({ srcPath, type, destDir, folderName, onConflict, leaveLink }) =>
+    moveSkill({ srcPath, type, destDir, folderName, onConflict, leaveLink }, { trashItem: (abs) => shell.trashItem(abs) })
+  );
   handle('skill:trash', ({ path: p }) => trashSkill(p, { trashItem: (abs) => shell.trashItem(abs) }));
   handle('skill:create', (args) => createSkill(args));
   handle('skill:compare', ({ pathA, pathB }) => compareSkills({ pathA, pathB }));

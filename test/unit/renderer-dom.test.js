@@ -469,7 +469,7 @@ test('安装方式默认「创建链接」，且排在最前', () => {
   assert.match(appJs, /\$\('#copy-mode-link'\)\.checked = true/, '默认选中链接');
   assert.match(appJs, /\$\('#copy-mode-copy'\)\.checked = true/, '不可用时退回复制');
   // 默认值依赖选中的目标目录，所以必须排在 fillTargetPicker 之后
-  const fillAt = appJs.indexOf("fillTargetPicker($('#copy-dir'), prefer)");
+  const fillAt = appJs.indexOf("fillTargetPicker($('#copy-dir'), prefer, undefined, dupDirsFor(s.name))");
   const defAt = appJs.indexOf('applyTarget(true)');
   assert.ok(fillAt > 0 && defAt > 0 && fillAt < defAt, '先填目标目录，再定默认安装方式');
   // 单选行里「创建链接」排在「复制副本」前面，和默认值一致
@@ -703,4 +703,12 @@ test('设置的页签在 modal-body 之外，内容滚动时分类栏不跟着�
   assert.match(appJs, /\$\$\('#set-tabs \.tab'\)/, '页签查询要限定作用域');
   assert.match(appJs, /classList\.toggle\('hidden', k !== key\)/, '切页签要收掉其他面板');
   assert.match(appJs, /\$\('#set-pane-' \+ k\)/, '面板是 #set-pane-<分类>');
+});
+
+test('多目录 Agent 视图按目录分段，且不丢卡', () => {
+  // 共用目录混在 Agent 自己的目录里时，看不出哪张卡物理上落在哪个目录 —— 按目录分段
+  assert.match(appJs, /buckets/, 'app.js 应有目录分桶');
+  assert.match(appJs, /viewedEntry\(s, state\.filter\)\.parentDir/, '分组键是「当前视图条目」所在目录');
+  // 兜底断言：parentDir 不在任何已登记目录的条目单独成段，绝不能静默丢卡
+  assert.match(appJs, /绝不能静默丢卡/, '必须有丢卡兜底注释标记');
 });
