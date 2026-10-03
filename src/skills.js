@@ -448,9 +448,10 @@ async function moveSkill({ srcPath, type, destDir, folderName, onConflict, leave
     };
     let trashOk = await attempt();
     if (!trashOk && fs.existsSync(src)) {
-      // Windows 上 trashItem 偶发 false 但实际已移入回收站：是否成功以磁盘实况为准
+      // Windows 上 trashItem 偶发 false 但实际已移入回收站：是否成功以磁盘实况为准。
+      // 重试只求原件还有机会进回收站，成败由下面的 existsSync 判定，这里不必接住返回值
       await new Promise((r) => setTimeout(r, 450));
-      trashOk = await attempt();
+      await attempt();
     }
     // 原件进不了回收站（目录被占用）：副本已在目标就位，迁移按「部分成功」收尾——
     // 绝不在错误路径删数据（回滚副本会误伤 overwrite 情形下目标原有的内容），
