@@ -3143,6 +3143,9 @@ async function mkInstallDetail() {
     closeModal('modal-mk-detail');
     toast(tf('已安装「{name}」✓', { name: v.name }), 'ok');
     await scan();
+    // 快路出口必须自己恢复按钮：下面的 finally 只属于慢路那个 try ——
+    // 漏了它，第一次安装成功后按钮就永久禁用（实测踩过：装完删掉再装，安装按钮点了没反应）
+    btn.disabled = false;
     return;
   } catch (fastErr) {
     log(t('单技能取回失败：') + (fastErr.message || ''), 'err');
