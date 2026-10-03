@@ -34,10 +34,6 @@
         <svg class="i" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
         <span id="dups-label">合并重复</span>
       </button>
-      <button id="btn-market" class="btn ghost" data-i18n-title="从 GitHub 仓库或索引源搜索并安装 SKILL">
-        <svg class="i" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m15.5 8.5-2 5-5 2 2-5z"/></svg>
-        <span data-i18n="发现">发现</span>
-      </button>
       <button id="btn-import" class="btn ghost">
         <svg class="i" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
         <span data-i18n="导入 SKILL">导入 SKILL</span>
@@ -60,6 +56,10 @@
       <div class="nav-item active" data-filter="dashboard">
         <span class="nav-icon"><svg class="i" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg></span>
         <span class="nav-name" data-i18n="总览">总览</span>
+      </div>
+      <div class="nav-item" data-filter="market">
+        <span class="nav-icon"><svg class="i" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><path d="M3 6h18"/><path d="M16 10a4 4 0 0 1-8 0"/></svg></span>
+        <span class="nav-name" data-i18n="SKILL 市场">SKILL 市场</span>
       </div>
       <div class="nav-section" data-i18n="全局 SKILL">全局 SKILL</div>
       <div id="agent-nav"></div>
@@ -160,6 +160,34 @@
     </div>
   </div>
 
+  <!-- SKILL 市场详情弹窗：看 SKILL.md、选安装位置、一键装（不往外跳浏览器） -->
+  <div class="modal-overlay hidden" id="modal-mk-detail">
+    <div class="modal mkd-modal">
+      <div class="modal-head">
+        <div class="modal-title" id="mkd-name"></div>
+        <button class="modal-close" data-close="modal-mk-detail">×</button>
+      </div>
+      <div class="modal-body mkd-body">
+        <div class="mkd-head">
+          <span class="mk-avatar lg" id="mkd-avatar"></span>
+          <div class="mkd-head-main">
+            <div class="mkd-sub" id="mkd-sub"></div>
+            <div class="mkd-desc" id="mkd-desc"></div>
+            <div class="hint" id="mkd-files"></div>
+            <div class="hint mkd-status" id="mkd-status"></div>
+          </div>
+        </div>
+        <div class="mkd-md md" id="mkd-md"></div>
+      </div>
+      <div class="modal-foot mkd-foot">
+        <label data-i18n="安装到">安装到</label>
+        <div id="mkd-target" class="picker"></div>
+        <button class="btn sm" id="mkd-github" data-i18n="在 GitHub 查看">在 GitHub 查看</button>
+        <button class="btn primary" id="mkd-install" data-i18n="安装">安装</button>
+      </div>
+    </div>
+  </div>
+
   <!-- 新建技能弹窗 -->
   <div class="modal-overlay hidden" id="modal-new">
     <div class="modal">
@@ -227,6 +255,7 @@
         <button class="tab" data-set-tab="machine" data-i18n="机器">机器</button>
         <button class="tab" data-set-tab="config" data-i18n="配置">配置</button>
         <button class="tab" data-set-tab="net" data-i18n="网络">网络</button>
+        <button class="tab" data-set-tab="market" data-i18n="SKILL 市场">SKILL 市场</button>
       </div>
       <div class="modal-body">
         <div class="set-pane" id="set-pane-appear">
@@ -378,10 +407,48 @@
           </div>
         </div>
         </div>
+
+        <div class="set-pane hidden" id="set-pane-market">
+        <div class="form-label" style="margin-top:0" data-i18n="GitHub Token（可选）">GitHub Token（可选）</div>
+        <div class="agent-block">
+          <div class="wd-grid">
+            <label data-i18n="Token">Token</label>
+            <input id="set-gh-token" type="password" class="input" autocomplete="off" placeholder="ghp_… / github_pat_…" />
+          </div>
+          <div class="hint" style="margin-top:8px" data-i18n="大多数场景用不上它：匿名额度（每小时 60 次）对偶尔装几个 SKILL 完全够用。检索频繁撞上限流、或想提高 GitHub 检索精度时再考虑；填了额度提升到 5000 次。Token 只会发给 github.com，绝不发给 skills.sh 等第三方站点。">
+            大多数场景用不上它：匿名额度（每小时 60 次）对偶尔装几个 SKILL 完全够用。检索频繁撞上限流、或想提高 GitHub 检索精度时再考虑；填了额度提升到 5000 次。Token 只会发给 github.com，绝不发给 skills.sh 等第三方站点。
+          </div>
+        </div>
+        </div>
       </div>
       <div class="modal-foot">
         <button class="btn" id="set-cancel" data-i18n="取消">取消</button>
         <button class="btn primary" id="btn-save-settings" data-i18n="保存设置">保存设置</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 从 GitHub 安装：市场页「从 GitHub 安装」按钮弹出，仓库 / 子目录 / zip 链接都从这里进。
+       Token 输入框不放这里（去「设置 → 网络」），只留一个直达设置页的快捷按钮 -->
+  <div class="modal-overlay hidden" id="modal-mkgh">
+    <div class="modal" style="width:600px">
+      <div class="modal-head">
+        <div class="modal-title" data-i18n="从 GitHub 安装">从 GitHub 安装</div>
+        <button class="modal-close" data-close="modal-mkgh">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="mk-bar">
+          <input id="mkgh-url" class="input" data-i18n-ph="https://github.com/owner/repo 或 …/tree/main/skills/x 或 …/x.zip" placeholder="https://github.com/owner/repo 或 …/tree/main/skills/x 或 …/x.zip" />
+          <button class="btn sm primary" id="mkgh-go" data-i18n="读取">读取</button>
+          <button class="btn sm" id="mkgh-token" data-i18n="Token 设置">Token 设置</button>
+        </div>
+        <div class="hint" id="mkgh-status"></div>
+        <div class="hint" style="margin-top:10px" data-i18n="支持三种链接：仓库地址（整仓扫描 SKILL）、/tree/ 子目录（精确定位到某个 SKILL）、zip 直链。">
+          支持三种链接：仓库地址（整仓扫描 SKILL）、/tree/ 子目录（精确定位到某个 SKILL）、zip 直链。
+        </div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn" data-close="modal-mkgh" data-i18n="取消">取消</button>
       </div>
     </div>
   </div>
@@ -556,64 +623,6 @@
     </div>
   </div>
 
-  <!-- 发现 SKILL：GitHub 搜索 / 粘贴链接 / 索引源 -->
-  <div class="modal-overlay hidden" id="modal-market">
-    <div class="modal modal-wide">
-      <div class="modal-head">
-        <div>
-          <div class="modal-title" data-i18n="发现 SKILL">发现 SKILL</div>
-          <div class="detail-meta"><span class="hint" id="mk-source"></span></div>
-        </div>
-        <button class="modal-close" data-close="modal-market">×</button>
-      </div>
-      <div class="modal-body">
-        <!-- 第一步：找 -->
-        <div id="mk-find">
-          <div class="tabs mk-tabs" id="mk-tabs">
-            <button class="tab active" data-mk-src="github" data-i18n="GitHub 搜索">GitHub 搜索</button>
-            <button class="tab" data-mk-src="url" data-i18n="粘贴链接">粘贴链接</button>
-            <button class="tab" data-mk-src="index" data-i18n="索引源">索引源</button>
-          </div>
-          <div class="mk-bar" id="mk-pane-github">
-            <input id="mk-query" class="input" data-i18n-ph="搜索关键词，如 mermaid diagram / commit / code review" />
-            <button class="btn primary" id="mk-go" data-i18n="搜索">搜索</button>
-          </div>
-          <div class="mk-bar hidden" id="mk-pane-url">
-            <input id="mk-url" class="input" placeholder="https://github.com/owner/repo 或 …/tree/main/skills/x 或 https://…/x.zip" />
-            <button class="btn primary" id="mk-go-url" data-i18n="读取">读取</button>
-          </div>
-          <div class="mk-bar hidden" id="mk-pane-index">
-            <input id="mk-index" class="input" placeholder="https://…/index.json" />
-            <button class="btn primary" id="mk-go-index" data-i18n="加载">加载</button>
-          </div>
-          <input id="mk-token" class="input mk-token" type="password" autocomplete="off" placeholder="GitHub Token（可选：匿名每小时 60 次，填了 5000 次）" />
-          <div id="mk-results" class="mk-results"></div>
-        </div>
-        <!-- 第二步：装 -->
-        <div id="mk-pick" class="hidden">
-          <div class="mk-pick-head">
-            <button class="btn sm" id="mk-back" data-i18n="← 换个来源">← 换个来源</button>
-            <span class="hint" id="mk-pick-hint"></span>
-          </div>
-          <div class="mk-pick-body">
-            <ul class="mk-list" id="mk-list"></ul>
-            <div class="mk-preview md" id="mk-preview"></div>
-          </div>
-          <div class="mk-pick-foot">
-            <label data-i18n="安装到">安装到</label>
-            <div id="mk-target" class="picker"></div>
-          </div>
-        </div>
-      </div>
-      <div class="modal-foot">
-        <span class="hint" id="mk-status"></span>
-        <div class="foot-right">
-          <button class="btn" data-close="modal-market" data-i18n="关闭">关闭</button>
-          <button class="btn primary hidden" id="mk-install" data-i18n="安装选中的 SKILL">安装选中的 SKILL</button>
-        </div>
-      </div>
-    </div>
-  </div>
 
   <div id="toasts"></div>
   <!-- 启动兜底：app.js 之前引入。若界面 6 秒内没起来（语法错误 / 依赖挂掉等

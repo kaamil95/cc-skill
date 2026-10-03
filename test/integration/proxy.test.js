@@ -76,7 +76,7 @@ test('proxy:test 把「连上了但被拒」与「连不上」分开：403 不�
   assert.equal(typeof r.ms, 'number');
 });
 
-test('proxy:test 带上市场里配的 GitHub Token（匿名额度是共享出口 IP 的，自己那点额度不经用）', async () => {
+test('proxy:test 只测链路：打 github.com 主站，不带 Token（弱化 Token 的存在感）', async () => {
   let seen = null;
   setFetchImpl(async (url, opts) => {
     seen = { url, headers: (opts && opts.headers) || {} };
@@ -86,8 +86,8 @@ test('proxy:test 带上市场里配的 GitHub Token（匿名额度是共享出�
   const r = await app.invoke('proxy:test', {});
   assert.equal(r.ok, true);
   assert.equal(r.httpStatus, undefined, '正常 200 就不该带 httpStatus');
-  assert.equal(seen.url, 'https://api.github.com/');
-  assert.equal(seen.headers.authorization, 'Bearer ghp_secret');
+  assert.equal(seen.url, 'https://github.com/', '测试目标是主站，不是按 IP 限流的 API 端点');
+  assert.equal(seen.headers.authorization, undefined, '代理测试不该使用 Token');
   await app.invoke('market:setConfig', { token: '' });
 });
 

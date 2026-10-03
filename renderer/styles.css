@@ -753,6 +753,15 @@ select.input {
   font-size: 10.5px;
   background: var(--fill-soft); color: var(--text-3);
 }
+/* 共用目录：整行淡淡地提亮，叠点 + 全部 Agent 名字在左、路径灰字在后 ——
+   与普通行同构，一行说清「谁在共用这里」 */
+.picker-opt.shared { background: var(--fill-faint); }
+.picker-opt.shared:hover,
+.picker-opt.shared:focus-visible { background: var(--fill); }
+.picker-opt.shared[aria-selected='true'] { background: var(--accent-soft); }
+.opt-dots { display: flex; flex: none; align-items: center; }
+.opt-dots .dot { width: 8px; height: 8px; border-radius: 50%; box-shadow: 0 0 0 1.5px var(--panel); }
+.opt-dots .dot + .dot { margin-left: -3px; }
 .picker-empty { padding: 10px 8px; font-size: 12.5px; color: var(--text-3); }
 
 /* ---------------- 详情弹窗 ---------------- */
@@ -1139,22 +1148,143 @@ select.input {
 .log-empty { color: var(--text-3); text-align: center; padding: 44px 0; }
 
 /* ---------------- 发现 SKILL（市场） ---------------- */
-.mk-tabs { margin: 0 0 12px; }
-.mk-bar { display: flex; gap: 8px; margin-bottom: 10px; }
-.mk-token { margin-bottom: 12px; }
-.mk-results { display: flex; flex-direction: column; gap: 8px; min-height: 220px; max-height: 44vh; overflow-y: auto; }
-.mk-repo {
-  display: flex; flex-direction: column; gap: 4px;
-  padding: 12px 14px; border-radius: 10px; background: var(--inset);
-  cursor: pointer; transition: background 0.12s;
+/* 市场页：一个搜索框 + 快捷标签 + 分类 chips；从 GitHub 安装是独立的弹窗按钮。
+   来源不是用户要选的东西 —— 来源只是行上的徽章，检索在主进程聚合。 */
+.mk-page { padding: 16px 20px 16px; }
+.mk-hero-sub { color: var(--text-2); font-size: 12.5px; margin: 0 0 14px; }
+.mk-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.mk-bar .input { flex: 1; min-width: 0; }
+/* 通栏大圆角搜索条：参考站那种一进来就能敲字的观感 */
+#mk-query { border-radius: 999px; padding: 9px 16px; }
+/* 搜索按钮与输入框同高、胶囊同形，比普通按钮醒目一档 */
+#mk-go {
+  padding: 10px 26px; border-radius: 999px;
+  font-size: 13.5px; font-weight: 600; flex: none;
 }
-.mk-repo:hover { background: var(--fill-hover); }
-.mk-repo-name { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 13.5px; }
-.mk-repo-desc { color: var(--text-2); font-size: 12.5px; line-height: 1.5; }
-.mk-repo-meta { display: flex; gap: 12px; color: var(--text-3); font-size: 11.5px; }
+.mk-row-kind {
+  font-size: 11.5px; color: var(--text-3); padding: 10px 2px 6px;
+  letter-spacing: 0.04em;
+}
+.mk-more-wrap { display: flex; justify-content: center; padding: 16px 0 6px; }
+/* 检索/翻页等待：环形转圈，色随强调色 —— 等待不空屏，结果回来整体替换 */
+.mk-spin {
+  display: inline-block; width: 18px; height: 18px; border-radius: 50%;
+  border: 2px solid var(--fill); border-top-color: var(--accent);
+  animation: mk-rotate 0.8s linear infinite;
+}
+.mk-spin.sm { width: 13px; height: 13px; margin-right: 6px; vertical-align: -2px; }
+@keyframes mk-rotate { to { transform: rotate(360deg); } }
+.mk-loading { display: flex; justify-content: center; padding: 46px 0; }
+/* 「同名已存在」：它是提醒不是信息，比普通 chip 重一级（警示底色 + 加粗） */
+.mk-dup {
+  flex: none; margin-left: 8px; padding: 2px 8px; border-radius: 6px;
+  font-size: 10.5px; font-weight: 600;
+  background: var(--warn-soft); color: var(--warn-text);
+}
+/* 回到顶部：固定在右下角的圆形按钮，滚过一屏才出现 */
+.mk-top {
+  position: fixed; right: 28px; bottom: 28px; z-index: 40;
+  width: 38px; height: 38px; border-radius: 50%;
+  background: var(--panel); color: var(--text-2);
+  box-shadow: 0 0 0 1px var(--ring), var(--shadow-pop);
+  font-size: 16px; line-height: 1; cursor: pointer;
+  transition: box-shadow 0.15s ease, color 0.15s ease;
+}
+.mk-top:hover { color: var(--accent); box-shadow: 0 0 0 1.5px var(--accent), var(--shadow-pop); }
+.mk-tags { display: flex; flex-wrap: wrap; gap: 8px; margin: 2px 0 4px; }
+/* 分类/排序 chips（学 skillhub-desktop 的「发现」页） */
+.mk-cats { display: flex; flex-direction: column; gap: 6px; margin: 2px 0 6px; }
+.mk-cats-row { display: flex; flex-wrap: wrap; gap: 8px; }
+/* 快捷词与分类 chips：Apple 式 —— 无描边的柔和胶囊，靠底色和字重区分状态；
+   按压有微缩回弹，悬停只是底色加深，不做描边跳动 */
+.mk-cats .mk-tag.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.mk-tag {
+  border: none; background: var(--fill-faint); border-radius: 999px;
+  padding: 5px 14px; font-size: 12px; line-height: 1.4; color: var(--text-2); cursor: pointer;
+  transition: background 0.18s ease, color 0.18s ease, transform 0.12s ease;
+}
+.mk-tag:hover { background: var(--fill); color: var(--text); }
+.mk-tag:active { transform: scale(0.94); }
+.mk-sec-head { display: flex; align-items: center; gap: 12px; margin: 16px 0 12px; }
+.mk-sec-head.hidden { display: none; }
+.mk-sec-title { font-size: 15px; font-weight: 700; letter-spacing: -0.01em; }
+.mk-sec-head #mk-status { flex: 1; }
+#mk-results { display: flex; flex-direction: column; }
+#mk-results.hidden { display: none; }
+/* SkillHub 式扁平列表：行直接坐在页面底色上，发丝线分隔，悬停整行提亮 —— 不再是卡片 */
+.mk-row {
+  display: flex; align-items: center; gap: 14px; padding: 13px 12px;
+  cursor: pointer; border-bottom: 1px solid var(--hairline);
+}
+.mk-row:first-child { border-top: 1px solid var(--hairline); }
+.mk-row:hover { background: var(--fill-faint); }
+.mk-row-main { flex: 1; min-width: 0; }
+.mk-row-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.mk-row-name { font-size: 14px; font-weight: 600; letter-spacing: -0.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mk-row-chip {
+  flex: none; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 10.5px; color: var(--text-2); background: var(--fill-faint);
+  padding: 2px 8px; border-radius: 999px;
+}
+.mk-row-desc {
+  color: var(--text-2); font-size: 12.5px; line-height: 1.5; margin-top: 3px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.mk-row-side { flex: none; display: flex; align-items: center; gap: 12px; }
+/* 彩色首字母图标：色相由 --h（名字哈希）决定，同一 SKILL 颜色稳定；
+   浅色主题用高亮度淡底+深字，深色/护眼用低亮度深底+亮字，高对比走灰阶保边框 */
+.mk-avatar {
+  flex: none; width: 42px; height: 42px; border-radius: 11px; position: relative; overflow: hidden;
+  background: hsl(var(--h) 72% 90%); color: hsl(var(--h) 62% 36%);
+  font-weight: 700; font-size: 17px; display: flex; align-items: center; justify-content: center;
+}
+.mk-avatar.lg { width: 54px; height: 54px; border-radius: 14px; font-size: 22px; }
+/* owner 头像取回来才显示（没 src 就留首字母，不留破图） */
+.mk-avatar-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: none; }
+.mk-avatar-img[src] { display: block; }
+[data-theme='dark'] .mk-avatar,
+[data-theme='sepia'] .mk-avatar { background: hsl(var(--h) 32% 26%); color: hsl(var(--h) 70% 72%); }
+[data-theme='contrast'] .mk-avatar { background: var(--field); color: var(--text); box-shadow: 0 0 0 1px var(--hairline-strong); }
+/* 指标回归参考站的素净形态：纯文字、右对齐，不做胶囊 */
+.mk-metric { flex: none; font-size: 12px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.mk-row-src { flex: none; font-size: 11.5px; color: var(--text-3); }
+/* ---------------- 市场详情弹窗 ---------------- */
+.mkd-modal { width: 720px; }
+.mkd-body { display: flex; flex-direction: column; gap: 14px; min-height: 0; }
+.mkd-head { display: flex; align-items: flex-start; gap: 14px; }
+.mkd-head-main { flex: 1; min-width: 0; }
+.mkd-sub { font-family: var(--mono); font-size: 11.5px; color: var(--text-3); }
+.mkd-desc { font-size: 13px; color: var(--text); line-height: 1.6; margin-top: 4px; }
+/* SKILL.md 正文：弹窗内独立滚动，底部按钮区始终可见 */
+.mkd-md {
+  border-top: 1px solid var(--hairline); padding-top: 12px;
+  max-height: 46vh; overflow-y: auto;
+}
+.mkd-foot { justify-content: flex-start; gap: 10px; }
+.mkd-foot label { font-size: 12px; color: var(--text-2); }
+.mkd-foot .picker { flex: 1; min-width: 0; }
+.mkd-foot .btn.primary { margin-left: auto; }
+/* 弹窗内的进度/错误行：取回、回退、失败都写在这里，隔着遮罩也看得见 */
+.mkd-status:not(:empty) { color: var(--warn-text); }
+/* 「从 GitHub 安装」弹窗的状态行：出错时染红 */
+#mkgh-status.err { color: var(--err-text); }
+/* 仓库模式：弹窗正文区是 SKILL 清单，条目是可点的整行按钮 */
+.mkd-skill-list { display: flex; flex-direction: column; }
+.mkd-skill-item {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+  background: none; border: none; border-top: 1px solid var(--hairline);
+  padding: 10px 2px; text-align: left; cursor: pointer;
+}
+.mkd-skill-item:hover { background: var(--accent-soft); }
+.mkd-skill-name { font-size: 13px; font-weight: 600; color: var(--text); }
+.mkd-skill-desc {
+  font-size: 12px; color: var(--text-3);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%;
+}
+
 .mk-pick-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
 .mk-pick-body { display: flex; gap: 14px; min-height: 260px; }
-.mk-list { list-style: none; flex: 0 0 46%; max-height: 44vh; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+.mk-list { list-style: none; flex: 0 0 42%; max-height: 56vh; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
 .mk-item { display: flex; align-items: flex-start; gap: 9px; padding: 9px 10px; border-radius: 8px; cursor: pointer; }
 .mk-item:hover { background: var(--fill-faint); }
 .mk-item.active { background: var(--accent-soft); }
@@ -1162,10 +1292,17 @@ select.input {
 .mk-item-main { flex: 1; min-width: 0; }
 .mk-item-name { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 500; }
 .mk-item-desc { color: var(--text-3); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.mk-preview { flex: 1; min-width: 0; max-height: 44vh; overflow-y: auto; border-left: 1px solid var(--hairline); padding-left: 14px; }
+.mk-preview { flex: 1; min-width: 0; max-height: 56vh; overflow-y: auto; border-left: 1px solid var(--hairline); padding-left: 14px; }
 .mk-pick-foot { display: flex; align-items: center; gap: 10px; margin-top: 12px; font-size: 12px; color: var(--text-2); }
 .mk-pick-foot select { flex: 1; }
 .mk-empty { color: var(--text-3); text-align: center; padding: 44px 0; font-size: 12.5px; line-height: 1.9; }
+/* 限流提示条：一行文字 + 一个直达 Token 输入框的按钮 */
+.mk-limit-hint {
+  display: flex; align-items: center; gap: 12px; margin-bottom: 12px;
+  padding: 9px 12px; border-radius: 10px;
+  background: var(--warn-soft); color: var(--warn-text); font-size: 12px;
+}
+.mk-limit-hint .btn { margin-left: auto; flex: none; }
 
 /* ---------------- Toast（系统通知风格） ---------------- */
 #toasts {

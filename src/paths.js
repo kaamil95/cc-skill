@@ -73,7 +73,7 @@ function resolveDataDir({ override, platform, exeDir, systemUserData }) {
 
 // 本应用在临时目录下创建的名字：<前缀>-<毫秒时间戳>[.zip]。
 // 必须精确到这个形状——只按前缀匹配会误删名字碰巧相似的其他目录。
-const TEMP_DIR_RE = /^cc-skill-(?:import|sync|restore)-\d+(?:\.zip)?$/;
+const TEMP_DIR_RE = /^cc-skill-(?:import|fetch|sync|restore)-\d+(?:\.zip)?$/;
 
 /**
  * 清理遗留的临时工作目录。

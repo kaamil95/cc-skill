@@ -271,14 +271,9 @@ function registerIpcHandlers({ getWindow, appDir, userData, applyProxy }) {
     await apply(proxy ? normalizeProxy({ ...saved, ...proxy }) : saved);
     const t0 = Date.now();
     try {
-      // 带上市场里配的 GitHub Token（有的话）。api.github.com 对匿名请求按**出口 IP**
-      // 限流（每小时 60 次），走代理时出口是共享节点，一测就是 403 —— 那看着像「代理不通」，
-      // 其实是 GitHub 拒了这个请求；带上 Token 才真的在测通路。
-      const ghToken = normalizeMarket(getConfig().market).token;
-      await httpGet('https://api.github.com/', {
-        headers: { 'user-agent': 'cc-skill', ...(ghToken ? { authorization: `Bearer ${ghToken}` } : {}) },
-        timeoutMs: 15000,
-      });
+      // 测的是 github.com 主站而不是 api.github.com：API 端点对匿名请求按出口 IP 限流
+      //（走代理时出口是共享节点，动辄 403），会把「链路通」误报成「被拒」。主站没这个毛病。
+      await httpGet('https://github.com/', { headers: { 'user-agent': 'cc-skill' }, timeoutMs: 15000 });
       return { ok: true, ms: Date.now() - t0 };
     } catch (err) {
       const msg = String((err && err.message) || err);
@@ -302,10 +297,37 @@ function registerIpcHandlers({ getWindow, appDir, userData, applyProxy }) {
     saveConfig();
     return { ok: true, market: config.market };
   });
-  handle('market:search', ({ query, page }) => market.searchGithub(query, { token: token(), page }));
-  handle('market:index', ({ url }) => market.fetchIndex(url || normalizeMarket(getConfig().market).indexUrl, { token: token() }));
+  // 聚合检索：skills.sh / SkillsMP / GitHub / 自定义索引并行，统一条目形状。
+  // token 只发给 GitHub 域（ghHeaders 的纪律），skills.sh / SkillsMP / 索引站都不在其列
+  handle('market:searchAll', ({ query, indexUrl, category, sortBy, page }) =>
+    market.searchAll(query, {
+      token: token(),
+      // 显式传空串 = 不用自定义索引；只有不传才回退到配置里的索引地址
+      indexUrl: typeof indexUrl === 'string' ? indexUrl : normalizeMarket(getConfig().market).indexUrl,
+      category: typeof category === 'string' ? category : '',
+      sortBy: typeof sortBy === 'string' && sortBy ? sortBy : 'popular',
+      page: Number.isInteger(page) && page > 0 ? page : 1,
+    })
+  );
+  // 描述回填：渲染层拿到列表后按行调用，描述与路径一次解析（skillCache 缓存 24h）
+  handle('market:resolveOne', async (args) => ({
+    ok: true,
+    ...(await market.resolveEntry(
+      { name: args.skillId, source: { kind: 'github', owner: args.owner, repo: args.repo, path: args.path || '' }, meta: { skillId: args.skillId } },
+      { token: token() }
+    )),
+  }));
+  // 仓库模式详情：列出仓库里的 SKILL，弹窗里挑一个看正文再装
+  handle('market:repoSkills', (args) => market.repoSkills(args, { token: token() }));
+  handle('market:listBuiltin', () => ({ ok: true, markets: market.listBuiltinMarkets() }));
   // 链接解析只在主进程做一处（src/market.js 的 parseSource）：渲染层再写一份必然会与它漂移
   handle('market:inspect', ({ source, raw }) => market.inspectSource(source || market.parseSource(raw), { token: token() }));
+  // 详情弹窗：描述 + SKILL.md 正文 + 文件清单，一次拿齐
+  handle('market:skillDetail', (args) => market.skillDetail(args, { token: token() }));
+  // 只取回单个 SKILL 的目录（不下载整仓 zip），返回临时目录交给 skill:copy
+  handle('market:fetchSkill', (args) => market.fetchSkillFiles(args, { token: token() }));
+  // owner 头像：主进程取回转 data URL —— 渲染层的 CSP 只放行 data:，这里也顺带走代理
+  handle('market:avatar', ({ owner }) => market.ownerAvatar({ owner }));
 
   // ------------------------------ 窗口控制（自绘标题栏）----------------------
   handle('win:minimize', () => {

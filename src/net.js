@@ -41,6 +41,30 @@ async function httpGet(url, { headers, timeoutMs = DEFAULT_TIMEOUT, expectJson =
   }
 }
 
+/** POST JSON 并解析 JSON 响应；超时与非 2xx 处理与 httpGet 一致 */
+async function httpPostJson(url, body, { headers, timeoutMs = DEFAULT_TIMEOUT } = {}) {
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), timeoutMs);
+  try {
+    const res = await fetchImpl(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...(headers || {}) },
+      body: JSON.stringify(body),
+      signal: ac.signal,
+      redirect: 'follow',
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}${res.statusText ? ' ' + res.statusText : ''} · ${url}`);
+    return await res.json();
+  } catch (err) {
+    if (err && (err.name === 'AbortError' || err.name === 'TimeoutError')) {
+      throw new Error(`请求超时（${Math.round(timeoutMs / 1000)} 秒）：${url}`, { cause: err });
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /**
  * 下载到文件。三件事都是必须的：
  * 1. 超时覆盖到正文——只盖响应头的话，服务端发完头就挂着会一直等下去
@@ -85,4 +109,4 @@ async function downloadToFile(url, destPath, { headers, timeoutMs = 120000, maxB
   }
 }
 
-module.exports = { setFetchImpl, httpFetch, httpGet, downloadToFile, DEFAULT_TIMEOUT, DEFAULT_MAX_BYTES };
+module.exports = { setFetchImpl, httpFetch, httpGet, httpPostJson, downloadToFile, DEFAULT_TIMEOUT, DEFAULT_MAX_BYTES };

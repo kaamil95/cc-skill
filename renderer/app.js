@@ -56,8 +56,8 @@ const state = {
   ui: { lang: 'auto' },
   proxy: { mode: 'system', url: '', bypass: '' },
   marketCfg: { indexUrl: '', token: '' },
-  // 发现弹窗的工作状态：来源页签 / 结果 / 已取回的 SKILL / 勾选集合 / 当前预览项
-  market: { src: 'github', skills: [], selected: new Set(), active: null },
+  // SKILL 市场页的工作状态：进入市场页时按 defaultMkState() 初始化（含 localStorage 记忆）
+  market: null,
   // 机器身份：标识用于和云端档案比对，名字只用于显示（见 src/config.js 的说明）
   machine: { id: '', name: '', hostname: '' },
   // 云端机器档案列表，以及待改名的目标（null = 改本机）
@@ -440,6 +440,8 @@ function setFilter(f) {
   $$('#project-nav .nav-item').forEach((el) => el.classList.toggle('active', el.dataset.filter === f));
   if (f === 'dashboard') {
     $('#main-title').textContent = t('总览');
+  } else if (f === 'market') {
+    $('#main-title').textContent = t('SKILL 市场');
   } else if (String(f).startsWith('project:')) {
     const proj = state.projects.find((p) => p.id === f.slice(8));
     $('#main-title').textContent = proj ? tf('{name} · SKILL', { name: proj.name }) : t('项目 SKILL');
@@ -528,6 +530,7 @@ function bindCards() {
 
 function renderGrid() {
   if (state.filter === 'dashboard') return renderDashboard();
+  if (state.filter === 'market') return renderMarketPage();
 
   const q = state.search.trim().toLowerCase();
   const match = (s) => !q || (s.name + ' ' + (s.description || '') + ' ' + s.folder).toLowerCase().includes(q);
@@ -1188,21 +1191,24 @@ async function deleteSkill(s, closeAfter = false) {
 // 一样重，扫下来分不出哪个是 Agent、哪个是目录，共用的 ~/.agents/skills 还会
 // 在 Codex 和 ZCode 下各出现一次，看着像两条不同的目标。
 
-/** 目录 → 读它的 Agent 数。>1 就是共用目录（如 ~/.agents/skills），要标出来 */
-function dirAgentCounts() {
-  const n = new Map();
-  for (const a of state.agents) for (const d of a.dirs || []) n.set(d, (n.get(d) || 0) + 1);
-  return n;
-}
-
 function targetGroups() {
-  const counts = dirAgentCounts();
-  const groups = [{ title: t('全局 · Agent 目录'), items: [] }];
-  for (const a of state.agents) {
-    for (const d of a.dirs || []) {
-      groups[0].items.push({ value: d, agent: a.name, color: a.color, dir: d, tag: (counts.get(d) || 0) > 1 ? t('共用') : '' });
+  // 共用目录（如 ~/.agents/skills 被多个 Agent 读）单独成组，与普通 Agent 目录平级：
+  // 混在一起就要靠「共用」标签逐行解释，分了组整组不言自明，行内专注回答「谁在用」。
+  const byDir = new Map();
+  for (const a of state.agents) for (const d of a.dirs || []) byDir.set(d, (byDir.get(d) || []).concat(a));
+  const solo = [];
+  const shared = [];
+  for (const [d, owners] of byDir) {
+    const item = { value: d, dir: d, agents: owners, shared: owners.length > 1, agent: '', color: '' };
+    if (item.shared) shared.push(item);
+    else {
+      item.agent = owners[0].name;
+      item.color = owners[0].color;
+      solo.push(item);
     }
   }
+  const groups = [{ title: t('全局 · Agent 目录'), items: solo }];
+  if (shared.length) groups.push({ title: t('全局 · 共享目录'), items: shared });
   for (const p of state.projects) {
     const items = ['.claude', '.agents', '.zcode', '.codex', '.qoder'].map((sub) => ({
       value: `${p.dir.replace(/[\\/]+$/, '')}/${sub}/skills`,
@@ -1220,6 +1226,15 @@ const pickerValue = (el) => el.dataset.value || '';
 
 function pickerFaceHTML(o) {
   if (!o) return `<span class="picker-dir">${esc(t('（没有可用的目标目录）'))}</span>`;
+  // 共用目录：叠点 + 全部 Agent 名字，路径靠右兜底——「谁在用」一眼可数
+  if (o.shared) {
+    const names = o.agents.map((a) => a.name).join(' · ');
+    return `<span class="picker-face">
+      <span class="opt-dots">${o.agents.map((a) => `<span class="dot" style="background:${esc(a.color)}"></span>`).join('')}</span>
+      <span class="picker-agent">${esc(names)}</span>
+      <span class="picker-dir" title="${esc(o.dir)}">${esc(shortPath(o.dir))}</span>
+    </span>`;
+  }
   return `<span class="picker-face">
       ${o.color ? `<span class="dot" style="background:${esc(o.color)}"></span>` : ''}
       <span class="picker-agent">${esc(o.agent)}</span>
@@ -1289,6 +1304,29 @@ function onPickerDocClick(e) {
   closePicker();
 }
 
+// 下拉选项：普通项一行「Agent · 目录」；共用项同构 —— 叠点 + 全部 Agent 名字
+// （' · ' 分隔）在左、路径灰字在后，组标题已说明这是共享目录
+function pickerOptHtml(el) {
+  return (o) => {
+    if (o.shared) {
+      const names = o.agents.map((a) => a.name).join(' · ');
+      return `<button type="button" class="picker-opt shared" role="option" data-value="${esc(o.value)}"
+          aria-selected="${o.value === pickerValue(el)}" title="${esc(names)}">
+          <span class="opt-dots">${o.agents.map((a) => `<span class="dot" style="background:${esc(a.color)}"></span>`).join('')}</span>
+          <span class="picker-agent">${esc(names)}</span>
+          <span class="picker-dir" title="${esc(o.dir)}">${esc(shortPath(o.dir))}</span>
+        </button>`;
+    }
+    return `<button type="button" class="picker-opt" role="option" data-value="${esc(o.value)}"
+          aria-selected="${o.value === pickerValue(el)}">
+          ${o.color ? `<span class="dot" style="background:${esc(o.color)}"></span>` : ''}
+          <span class="picker-agent">${esc(o.agent)}</span>
+          <span class="picker-dir" title="${esc(o.dir)}">${esc(shortPath(o.dir))}</span>
+          ${o.tag ? `<span class="picker-tag">${esc(o.tag)}</span>` : ''}
+        </button>`;
+  };
+}
+
 function openPicker(el, focusIdx) {
   closePicker();
   const groups = el._groups || [];
@@ -1296,23 +1334,7 @@ function openPicker(el, focusIdx) {
   pickerPop.className = 'picker-pop';
   pickerPop.setAttribute('role', 'listbox');
   pickerPop.innerHTML = groups.length
-    ? groups
-        .map(
-          (g) =>
-            `<div class="picker-group">${esc(g.title)}</div>` +
-            g.items
-              .map(
-                (o) => `<button type="button" class="picker-opt" role="option" data-value="${esc(o.value)}"
-          aria-selected="${o.value === pickerValue(el)}">
-          ${o.color ? `<span class="dot" style="background:${esc(o.color)}"></span>` : ''}
-          <span class="picker-agent">${esc(o.agent)}</span>
-          <span class="picker-dir" title="${esc(o.dir)}">${esc(shortPath(o.dir))}</span>
-          ${o.tag ? `<span class="picker-tag">${esc(o.tag)}</span>` : ''}
-        </button>`
-              )
-              .join('')
-        )
-        .join('')
+    ? groups.map((g) => `<div class="picker-group">${esc(g.title)}</div>` + g.items.map(pickerOptHtml(el)).join('')).join('')
     : `<div class="picker-empty">${esc(t('还没有配置任何 Agent 目录或项目'))}</div>`;
   document.body.appendChild(pickerPop);
   el.dataset.open = 'true';
@@ -2447,7 +2469,7 @@ $('#set-accent-custom').addEventListener('input', (e) => previewTheme(readThemeI
 
 // 设置面板按类别分页：配置项越来越多，一屏一类才找得到。
 // 页签在 modal-body 之外，内容滚动时分类栏不跟着走（见 index.html）
-const SET_TABS = ['appear', 'sync', 'machine', 'config', 'net'];
+const SET_TABS = ['appear', 'sync', 'machine', 'config', 'net', 'market'];
 
 function showSettingsTab(key) {
   if (!SET_TABS.includes(key)) key = SET_TABS[0];
@@ -2472,6 +2494,8 @@ function openSettings(tab) {
   fillThemeInputs(currentThemeSel());
   themeSnapshot = readThemeInputs();
   fillProxyInputs(state.proxy);
+  // 市场的 GitHub Token 迁到设置里：市场页不再放凭据输入框
+  $('#set-gh-token').value = (state.marketCfg && state.marketCfg.token) || '';
   renderMachineLine();
   // 默认停在上次看过的那一类（调用方要直达某一类时才传 key，如市场的「检查代理设置」）
   showSettingsTab(tab || state.settingsTab);
@@ -2531,14 +2555,11 @@ $('#btn-px-test').addEventListener('click', async () => {
   st.style.color = '';
   st.textContent = t('测试中…');
   const r = await api.invoke('proxy:test', { proxy: readProxyInputs() });
-  // 有 HTTP 响应就说明链路是通的：403 基本都是 GitHub 对匿名请求的限流（每小时 60 次，
-  // 走代理时出口 IP 共享，一测就撞上）。把它报成「连接失败」会让人白折腾代理设置。
+  // 测试目标是 github.com 主站：拿到 HTTP 响应 = 链路通；主站不会像 API 端点那样
+  // 对匿名请求按出口 IP 限流，所以不需要再拿 Token 出来说事——代理测试只管链路。
   if (r.ok && r.httpStatus) {
     st.style.color = 'var(--warn-text)';
-    st.textContent = tf('链路通（{ms} ms），目标返回 HTTP {s}：多为 GitHub 匿名限流（每小时 60 次），在「发现」里填个 Token 即可', {
-      ms: r.ms,
-      s: r.httpStatus,
-    });
+    st.textContent = tf('链路通（{ms} ms），目标返回 HTTP {s}', { ms: r.ms, s: r.httpStatus });
     return;
   }
   st.style.color = r.ok ? 'var(--ok-text)' : 'var(--err-text)';
@@ -2554,6 +2575,9 @@ $('#btn-save-settings').addEventListener('click', async () => {
     // 代理单独走一条通道：它要顺带把配置应用到 session，不像 ui 只是存个偏好
     const px = await api.invoke('proxy:set', { proxy: readProxyInputs() });
     if (px.ok) state.proxy = px.proxy;
+    // GitHub Token 与代理同属网络类配置：这里落盘，市场检索时主进程来读
+    const mk = await api.invoke('market:setConfig', { token: $('#set-gh-token').value.trim() });
+    if (mk.ok) state.marketCfg = mk.market;
     applyOverlay(state.ui);
     applyTheme(state.ui);
     theme.cache(state.ui); // 供下次启动首帧前套用，避免闪一下默认配色
@@ -2610,8 +2634,6 @@ $('#btn-clear-logs').addEventListener('click', () => {
 // 侧栏静态导航项（总览）在这里绑定；Agent/项目 列表在各自渲染函数中绑定
 $$('#sidebar > .nav-item').forEach((el) => el.addEventListener('click', () => setFilter(el.dataset.filter)));
 
-$('#btn-market').addEventListener('click', openMarket);
-
 $('#btn-import').addEventListener('click', () => {
   state.importSrc = null;
   $('#import-preview').classList.add('hidden');
@@ -2636,143 +2658,800 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
-// ------------------------------ 发现 SKILL（市场） ---------------------------
-// 两步：先「找」（GitHub 搜索 / 粘链接 / 索引源），再「装」（列出该来源里的 SKILL、
-// 勾选、预览、选目标目录）。搜索与下载都在主进程做，所以走的是同一套代理配置。
-const mkStatus = (s) => ($('#mk-status').textContent = s || '');
+// ------------------------------ SKILL 市场（侧栏页） --------------------------
+// 一个搜索框，一次检索，聚合所有来源（skills.sh / SkillsMP / GitHub / 自定义索引）。
+// 来源只是行上的徽章：列表统一渲染、统一进详情弹窗；链接安装（仓库 / zip 直链）与
+// Token / 索引地址收进「高级选项」。搜索与下载都在主进程做，走同一套代理配置。
+// 市场页是重画型页面：用户随时可能切去别的页，把这套 DOM 整个换掉。市场里的异步
+// 回调（检索/回填/安装）晚一步回来时，绝不能因为元素不在了就抛错（实测踩过：
+// 回总览后弹「Cannot set properties of null (setting 'textContent')」）。
+// 写市场 DOM 的每个入口都必须先确认页面还活着。
+const mkAlive = () => !!$('#mk-status');
+const mkStatus = (s) => {
+  const el = $('#mk-status');
+  if (el) el.textContent = s || '';
+};
 
 function showMkStep(step) {
+  if (!$('#mk-find')) return;
+  state.market.step = step;
   $('#mk-find').classList.toggle('hidden', step !== 'find');
+  // 结果网格与节标题长在控制卡外面（页面底色上的卡片网格），跟「找」这一步一起显隐；
+  // 安装按钮长在勾选卡（mk-pick-foot）里，随勾选卡一起显隐
+  $('#mk-results').classList.toggle('hidden', step !== 'find');
+  $('#mk-sec-head').classList.toggle('hidden', step !== 'find');
   $('#mk-pick').classList.toggle('hidden', step !== 'pick');
-  $('#mk-install').classList.toggle('hidden', step !== 'pick');
+  updateMkSecHead();
 }
 
-function openMarket() {
-  state.market = { src: 'github', skills: [], selected: new Set(), active: null };
-  $('#mk-query').value = '';
-  $('#mk-url').value = '';
-  $('#mk-index').value = (state.marketCfg && state.marketCfg.indexUrl) || '';
-  $('#mk-token').value = (state.marketCfg && state.marketCfg.token) || '';
-  $('#mk-results').innerHTML = '';
-  $('#mk-preview').innerHTML = '';
-  $('#mk-list').innerHTML = '';
-  $('#mk-source').textContent = '';
-  mkStatus('');
-  selectMkSource('github');
-  showMkStep('find');
-  fillTargetPicker($('#mk-target'));
-  openModal('modal-market');
+// 节标题（「热门 SKILL」/「检索结果」）有内容且在「找」这步才露头，否则整条收起
+function updateMkSecHead() {
+  const head = $('#mk-sec-head');
+  if (!head) return;
+  const show = state.market && state.market.step === 'find' && $('#mk-sec-title').textContent;
+  head.classList.toggle('hidden', !show);
 }
 
-function selectMkSource(src) {
-  state.market.src = src;
-  $$('#mk-tabs .tab').forEach((b) => b.classList.toggle('active', b.dataset.mkSrc === src));
-  ['github', 'url', 'index'].forEach((s) => $('#mk-pane-' + s).classList.toggle('hidden', s !== src));
-  // Token 只对 GitHub 相关来源有意义
-  $('#mk-token').style.display = src === 'github' ? '' : 'none';
-  mkStatus('');
+function mkSectionTitle(text) {
+  const el = $('#mk-sec-title');
+  if (!el) return;
+  el.textContent = text || '';
+  updateMkSecHead();
 }
 
-$('#mk-tabs').addEventListener('click', (e) => {
-  const btn = e.target.closest('.tab');
-  if (btn) selectMkSource(btn.dataset.mkSrc);
-});
+// 结果列表一次最多画多少行：站点一页能给九十多条，全画又长又费（每行都要取头像）
+// 每页展示多少行：先展示这些，剩余的由「加载更多」展开/翻页
+const MK_PAGE = 30;
 
-// 索引地址与 token 都是「填了就该记住」的东西，失焦即存，不用额外点保存
-const saveMarketCfg = async () => {
-  const r = await api.invoke('market:setConfig', { indexUrl: $('#mk-index').value.trim(), token: $('#mk-token').value.trim() });
-  if (r.ok) state.marketCfg = r.market;
-};
-$('#mk-index').addEventListener('blur', saveMarketCfg);
-$('#mk-token').addEventListener('blur', saveMarketCfg);
+// 市场指标用紧凑数字（407450 → 40.7万 / 407.5K），Intl 按系统 locale 自行选择
+function fmtMkNum(n) {
+  try {
+    return new Intl.NumberFormat(undefined, { notation: 'compact', maxSignificantDigits: 3 }).format(n);
+  } catch (_) {
+    return String(n);
+  }
+}
+
+function defaultMkState() {
+  // 一个搜索框搜所有来源，不再区分「来源/站点」；上次的结果与装到一半的勾选页照旧恢复
+  return { step: 'find', skills: [], selected: new Set(), results: null, source: '', category: '', sortBy: 'popular' };
+}
+
+/** 市场页与总览同模式：每次进入都重画；mk-* 事件由 bindMarketPage 重挂，上次的结果还在就还给他 */
+function renderMarketPage() {
+  state.market ||= defaultMkState();
+  $('#main-hint').textContent = '';
+  const m = state.market;
+  $('#grid').innerHTML = `
+    <section class="dash-card mk-page">
+      <div class="mk-hero">
+        <div class="mk-hero-sub">${t('发现并安装社区 SKILL，一次检索，聚合所有来源')}</div>
+      </div>
+      <div id="mk-find">
+        <div class="mk-bar">
+          <input id="mk-query" class="input" data-i18n-ph="搜索 SKILL，如 commit / pdf / web-search" />
+          <button class="btn primary" id="mk-go" data-i18n="搜索">搜索</button>
+          <!-- 链接安装收成一颗按钮：高级选项的折叠区没了，这是从仓库装 SKILL 的唯一入口 -->
+          <button class="btn" id="mk-gh" data-i18n="从 GitHub 安装">从 GitHub 安装</button>
+        </div>
+        <div class="mk-tags" id="mk-tags"></div>
+        <div class="mk-cats" id="mk-cats"></div>
+      </div>
+      <div id="mk-pick" class="hidden">
+        <div class="mk-pick-head">
+          <button class="btn sm" id="mk-back" data-i18n="返回">返回</button>
+          <span class="hint" id="mk-source"></span>
+        </div>
+        <div class="mk-pick-body">
+          <ul class="mk-list" id="mk-list"></ul>
+          <div class="mk-preview md" id="mk-preview"></div>
+        </div>
+        <div class="mk-pick-foot">
+          <label data-i18n="安装到">安装到</label>
+          <div id="mk-target" class="picker"></div>
+          <!-- 安装按钮必须长在勾选卡里：节标题在「装」这步是隐藏的，放那儿等于没有按钮 -->
+          <button class="btn primary" id="mk-install" data-i18n="安装选中的 SKILL">安装选中的 SKILL</button>
+        </div>
+      </div>
+    </section>
+    <div class="mk-sec-head hidden" id="mk-sec-head">
+      <span class="mk-sec-title" id="mk-sec-title"></span>
+      <span class="hint" id="mk-status"></span>
+    </div>
+    <div id="mk-results" class="hidden"></div>
+    <button class="mk-top hidden" id="mk-top" data-i18n-title="回到顶部" title="回到顶部">↑</button>
+  `;
+  bindMarketPage();
+  // 先定步骤再恢复数据：结果网格长在控制卡外，显隐由 showMkStep 一并管
+  showMkStep(m.skills.length ? 'pick' : 'find');
+  // 上次搜过的结果还在：还给他，省一次重复检索
+  if (m.results) renderMkResults(m.results);
+  // 装到一半的勾选页也要原样回来
+  if (m.skills.length) {
+    $('#mk-source').textContent = m.source || '';
+    showMkStep('pick');
+    renderMkList();
+    fillTargetPicker($('#mk-target'));
+  }
+  // 首次进页自动拉热门：像市场官网那样，进来就有内容可逛。
+  // 有来源成功才落 featuredTried —— 全挂（断网等）下次进页重试
+  if (!m.results && !m.featuredTried) mkSearch('');
+  // 分类/排序 chips 不依赖网络，进页立即渲染
+  renderMkCats();
+  // 快捷标签 = 各站注册的检索建议词，合并去重后渲染（数据回来才渲染，晚一点无妨）
+  api.invoke('market:listBuiltin').then((r) => {
+    if (r && r.ok) {
+      state.marketSites = r.markets;
+      renderMkTags();
+    }
+  });
+}
+
+// 快捷标签 = 各站注册的检索建议词，合并去重 —— 点标签就是按那个词做一次聚合检索
+function renderMkTags() {
+  const box = $('#mk-tags');
+  if (!box) return;
+  const tags = [];
+  const seen = new Set();
+  for (const site of state.marketSites || []) {
+    for (const tag of (site && site.featured ? site.featured.tags : []) || []) {
+      if (!seen.has(tag)) {
+        seen.add(tag);
+        tags.push(tag);
+      }
+    }
+  }
+  box.innerHTML =
+    tags.map((q) => `<button class="mk-tag" data-q="${esc(q)}">${esc(q)}</button>`).join('') || `<span class="hint">${t('输入关键词开始检索')}</span>`;
+}
+
+// 分类与排序（学 skillhub-desktop 的「发现」）：分类浏览只走 SkillHub 目录，
+// 关键词检索时分类不参与（各来源没有统一的分类体系）
+const MK_CATEGORIES = [
+  ['', '全部'],
+  ['collections', '合集'],
+  ['development', '开发'],
+  ['devops', '运维'],
+  ['testing', '测试'],
+  ['documentation', '文档'],
+  ['ai-ml', 'AI / ML'],
+  ['frontend', '前端'],
+  ['backend', '后端'],
+  ['security', '安全'],
+];
+const MK_SORTS = [
+  ['popular', '热门'],
+  ['newest', '最新'],
+  ['stars', '星标最多'],
+  ['name', '名称 A-Z'],
+];
+
+function renderMkCats() {
+  const box = $('#mk-cats');
+  if (!box) return;
+  const m = state.market;
+  const chip = (active, attrs, label) => `<button class="mk-tag${active ? ' active' : ''}" ${attrs}>${esc(label)}</button>`;
+  const cats = MK_CATEGORIES.map(([id, label]) => chip(m.category === id, `data-cat="${esc(id)}"`, t(label))).join('');
+  const sorts = MK_SORTS.map(([id, label]) => chip(m.sortBy === id, `data-sort="${esc(id)}"`, t(label))).join('');
+  box.innerHTML = `<div class="mk-cats-row">${cats}</div><div class="mk-cats-row">${sorts}</div>`;
+}
+
+// mk-* 的事件挂载集中在这里：市场页每次进入都重画，绑定必须跟着重画走
+// 滚动监听只绑一次：#main 是常驻 DOM，市场页重画不会重复挂；按钮节点每次重画后由选择器现查
+let mkScrollBound = false;
+function mkBindScrollTop() {
+  if (mkScrollBound) return;
+  mkScrollBound = true;
+  const update = () => {
+    const btn = $('#mk-top');
+    if (!btn) return;
+    btn.classList.toggle('hidden', $('#main').scrollTop < 300);
+  };
+  $('#main').addEventListener('scroll', update, { passive: true });
+}
+
+function bindMarketPage() {
+  $('#mk-go').addEventListener('click', () => mkSearch());
+  $('#mk-query').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') mkSearch();
+  });
+  $('#mk-tags').addEventListener('click', (e) => {
+    const tag = e.target.closest('.mk-tag');
+    if (!tag) return;
+    $('#mk-query').value = tag.dataset.q;
+    mkSearch(tag.dataset.q);
+  });
+  // 分类 / 排序：只影响 SkillHub 目录（catalog），点完就地重拉；输入了关键词就照常全源检索
+  $('#mk-cats').addEventListener('click', (e) => {
+    const cat = e.target.closest('[data-cat]');
+    if (cat) {
+      state.market.category = cat.dataset.cat;
+      renderMkCats();
+      mkSearch('');
+      return;
+    }
+    const sort = e.target.closest('[data-sort]');
+    if (sort) {
+      state.market.sortBy = sort.dataset.sort;
+      renderMkCats();
+      if (!state.market.results || !state.market.results.q) mkSearch('');
+    }
+  });
+  $('#mk-gh').addEventListener('click', () => {
+    $('#mkgh-status').textContent = '';
+    openModal('modal-mkgh');
+  });
+  $('#mk-back').addEventListener('click', () => {
+    showMkStep('find');
+    mkStatus('');
+  });
+  $('#mk-install').addEventListener('click', mkInstall);
+  $('#mk-list').addEventListener('click', (e) => {
+    const li = e.target.closest('.mk-item');
+    if (!li) return;
+    const p = li.dataset.path;
+    // 勾选框只管勾选，点行本身只看预览——两个动作别混在一起
+    if (e.target.tagName === 'INPUT') {
+      if (e.target.checked) state.market.selected.add(p);
+      else state.market.selected.delete(p);
+      updateMkInstall();
+      return;
+    }
+    $$('#mk-list .mk-item').forEach((el) => el.classList.toggle('active', el === li));
+    const skill = state.market.skills.find((s) => s.absPath === p);
+    if (skill) mkPreview(skill);
+  });
+  // 点行（含行上的「安装」按钮）都进详情弹窗：详情里看 SKILL.md、选安装位置、一键装。
+  // 不再往外跳浏览器 —— 详情、安装都留在应用内
+  // 回到顶部：滚过一屏才现身；市场页每次进都重画，滚动监听只绑一次（绑在常驻的 #main 上）
+  $('#mk-top').addEventListener('click', () => {
+    $('#main').scrollTo({ top: 0, behavior: 'smooth' });
+  });
+  mkBindScrollTop();
+  $('#mk-results').addEventListener('click', (e) => {
+    // 「加载更多」先于行点击判定：它长在列表里，但不该触发行详情
+    if (e.target.closest('.mk-more')) {
+      mkMore();
+      return;
+    }
+    const row = e.target.closest('.mk-row');
+    if (!row) return;
+    mkOpenDetail(Number(row.dataset.i));
+  });
+}
 
 // 网络类失败给一条出路：直接把用户送到代理设置（市场连不上，十有八九是代理没配）
 function mkFail(r) {
   mkStatus('');
   const err = (r && r.error) || t('未知错误');
   const netish = /超时|HTTP (4\d\d|5\d\d)|fetch failed|ENOTFOUND|ECONN|network|SSL|socket/i.test(err);
-  const hint = /403/.test(err) ? t('可能是 GitHub 匿名额度用尽（每小时 60 次），填个 Token 再试。') : '';
-  $('#mk-results').innerHTML = `<div class="mk-empty">${esc(t('失败：') + err)}${hint ? '<br>' + esc(hint) : ''}
+  const hint = /403/.test(err) ? t('可能是 GitHub 匿名额度用尽（每小时 60 次），在「设置 → SKILL 市场」里配一个 GitHub Token 再试。') : '';
+  const box = $('#mk-results');
+  if (!box) return; // 页面已被切走：失败信息无处可写，也别抛错
+  box.innerHTML = `<div class="mk-empty">${esc(t('失败：') + err)}${hint ? '<br>' + esc(hint) : ''}
     ${netish ? `<br><button class="btn sm" id="mk-fix-proxy">${t('检查代理设置')}</button>` : ''}</div>`;
   const btn = $('#mk-fix-proxy');
   if (btn) {
     btn.addEventListener('click', () => {
-      closeModal('modal-market');
       openSettings('net');
       setTimeout(() => $('#px-mode').focus(), 60);
     });
   }
 }
 
-function renderMkRepos(items, total) {
-  mkStatus(total ? tf('共 {n} 个仓库，按 star 排序；点一个查看其中的 SKILL', { n: total }) : '');
-  const box = $('#mk-results');
-  if (!items.length) {
-    box.innerHTML = `<div class="mk-empty">${t('没有找到仓库。<br>换个关键词，或改用「粘贴链接」直接给仓库地址。')}</div>`;
+// --------------------- 从 GitHub 安装（弹窗，模板在 index.html） ---------------
+// 弹窗是静态 DOM，绑定挂一次就够；#mk-gh 在市场页模板里，随 bindMarketPage 重挂
+$('#mkgh-go').addEventListener('click', async () => {
+  const raw = $('#mkgh-url').value.trim();
+  if (!raw) return;
+  const st = $('#mkgh-status');
+  const btn = $('#mkgh-go');
+  btn.disabled = true;
+  st.classList.remove('err');
+  st.textContent = t('下载并解压中…（仓库大时会久一点）');
+  // 不在渲染层解析：认不出来的地址由主进程给出统一的错误，避免两份解析器漂移
+  const r = await api.invoke('market:inspect', { raw });
+  btn.disabled = false;
+  if (!r.ok) {
+    st.classList.add('err');
+    st.textContent = t('读取失败：') + (r.error || r.reason || t('未知错误'));
     return;
   }
-  box.innerHTML = items
-    .map(
-      (it) => `<div class="mk-repo" data-owner="${esc(it.owner)}" data-repo="${esc(it.repo)}">
-      <div class="mk-repo-name">${esc(it.fullName)}${it.stars ? `<span class="chip">★ ${it.stars}</span>` : ''}</div>
-      <div class="mk-repo-desc">${esc(it.description) || t('（无描述）')}</div>
-      <div class="mk-repo-meta">${it.updatedAt ? `<span>${t('最近更新')} ${esc(String(it.updatedAt).slice(0, 10))}</span>` : ''}</div>
-    </div>`
-    )
-    .join('');
+  closeModal('modal-mkgh');
+  $('#mkgh-url').value = '';
+  mkShowPick(r, raw);
+  mkStatus(state.market.skills.length ? tf('共 {n} 个 SKILL，默认全选', { n: state.market.skills.length }) : '');
+});
+$('#mkgh-url').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') $('#mkgh-go').click();
+});
+// Token 快捷入口：从弹窗直达「设置 → SKILL 市场」，填完点保存设置再回来读取
+$('#mkgh-token').addEventListener('click', () => {
+  closeModal('modal-mkgh');
+  openSettings('market');
+  setTimeout(() => $('#set-gh-token').focus(), 60);
+});
+
+// ------------------------------ 市场详情弹窗 --------------------------------
+// 点一行 → 应用内弹窗：SKILL.md 正文 + 文件数 + 安装位置选择 + 一键安装。
+// 安装只取回这一个 SKILL 的目录（main 里按 tree 清单逐个 raw 下载），
+// 不再为了装一个 SKILL 去下整仓 zip —— 大仓库那是几十上百 MB。
+let mkdCurrent = null; // 当前展示的条目，用来丢弃「加载中又点了别的行」的迟到结果
+let mkdBodySeq = 0; // 正文加载序号：仓库模式下点不同 SKILL，迟到的正文作废
+
+/** 统一条目（kind: skill/repo/zip）→ 详情弹窗数据。仓库结果先列 SKILL 清单，
+    zip 条目点「安装」时转交给链接安装流程（mkInspect → 勾选页）。 */
+function mkDetailView(it) {
+  const metric = it.installs ? `⬇ ${fmtMkNum(it.installs)}` : it.stars ? `★ ${fmtMkNum(it.stars)}` : '';
+  return {
+    kind: it.kind,
+    name: it.name,
+    owner: it.owner || '',
+    repo: it.repo || '',
+    skillId: it.skillId || '',
+    path: it.path || '',
+    description: it.description || '',
+    metric,
+    srcName: it.srcName || '',
+    source: it.source || null,
+    url: mkEntryUrl(it) || (it.owner && it.repo ? `https://github.com/${it.owner}/${it.repo}` : ''),
+  };
 }
 
-async function mkSearchGithub() {
-  const query = $('#mk-query').value.trim();
-  if (!query) return;
-  await saveMarketCfg();
+/** 仓库模式第一步：列出仓库里的 SKILL 清单，点一个再进正文（正文加载走 loadSkillBody） */
+function renderRepoSkillList(v) {
+  const list = v.repoSkills || [];
+  const total = v.total || list.length;
+  $('#mkd-files').textContent = list.length ? tf('{n} 个 SKILL', { n: total }) : '';
+  if (!list.length) {
+    $('#mkd-md').innerHTML = `<div class="hint">${t('没有在仓库里找到 SKILL.md')}</div>`;
+    return;
+  }
+  // 清单有截断（大仓只列前 20）：总数照实说，别让人以为就这几个
+  const truncated = total > list.length ? tf('（共 {total} 个，仅列出前 {n} 个）', { total, n: list.length }) : '';
+  $('#mkd-md').innerHTML = `<div class="mkd-skill-list">${list
+    .map(
+      (s, j) => `<button class="mkd-skill-item" data-j="${j}">
+        <span class="mkd-skill-name">${esc(s.name)}</span>
+        <span class="mkd-skill-desc">${esc(s.description || t('暂无描述'))}</span>
+      </button>`
+    )
+    .join('')}</div>${truncated ? `<div class="hint" style="padding:8px 2px">${esc(truncated)}</div>` : ''}`;
+}
+
+/** 加载某个 SKILL 目录的正文与文件清单（skill 模式详情、仓库模式点选后共用） */
+async function loadSkillBody(v) {
+  const seq = ++mkdBodySeq;
+  $('#mkd-install').classList.remove('hidden');
+  $('#mkd-md').innerHTML = `<div class="hint">${t('读取 SKILL.md…')}</div>`;
+  $('#mkd-files').textContent = '';
+  const r = await api.invoke('market:skillDetail', { owner: v.owner, repo: v.repo, skillId: v.skillId, path: v.path });
+  if (seq !== mkdBodySeq || mkdCurrent !== v) return; // 期间点了别的行/别的 SKILL，这份作废
+  if (!r.ok) {
+    $('#mkd-md').innerHTML = `<div class="hint">${esc(r.error || t('读取失败'))}</div>`;
+    return;
+  }
+  v.path = r.path;
+  v.files = r.files || [];
+  if (r.description) {
+    v.description = r.description;
+    $('#mkd-desc').textContent = r.description;
+  }
+  $('#mkd-files').textContent = tf('{n} 个文件', { n: v.files.length });
+  $('#mkd-md').innerHTML = api.md(r.body || '') || `<div class="hint">${t('SKILL.md 是空的')}</div>`;
+  mkdStatus('');
+}
+
+async function mkOpenDetail(i) {
+  const box = state.market.results;
+  const item = box && box.items ? box.items[i] : null;
+  if (!item) return;
+  const v = mkDetailView(item);
+  mkdCurrent = v;
+  $('#mkd-name').textContent = v.name;
+  const av = $('#mkd-avatar');
+  av.textContent = (v.name || '?').slice(0, 1).toUpperCase();
+  av.style.setProperty('--h', mkHue(v.name));
+  av.querySelector('.mk-avatar-img')?.remove();
+  $('#mkd-sub').innerHTML = [v.owner && v.repo ? esc(v.owner + '/' + v.repo) : '', v.metric, v.srcName].filter(Boolean).join(' · ');
+  $('#mkd-desc').textContent = v.description || t('暂无描述');
+  $('#mkd-files').textContent = '';
+  $('#mkd-github').classList.toggle('hidden', !v.url);
+  fillTargetPicker($('#mkd-target'));
+  openModal('modal-mk-detail');
+  if (v.owner) {
+    const img = document.createElement('img');
+    img.className = 'mk-avatar-img';
+    av.appendChild(img);
+    // 不 await：头像慢不能拖住详情正文（限流网络下会等很久），回来时对号入座
+    api.invoke('market:avatar', { owner: v.owner }).then((r) => {
+      if (r && r.ok && mkdCurrent === v && img.isConnected) img.src = r.dataUrl;
+    });
+  }
+  // 仓库结果：先列仓库里的 SKILL 清单（点一个才加载正文与安装按钮）
+  if (v.kind === 'repo') {
+    $('#mkd-install').classList.add('hidden');
+    $('#mkd-md').innerHTML = `<div class="hint">${t('读取仓库 SKILL 清单…')}</div>`;
+    const r = await api.invoke('market:repoSkills', { owner: v.owner, repo: v.repo });
+    if (mkdCurrent !== v) return; // 期间又点了别的行，这份结果作废
+    if (!r.ok) {
+      $('#mkd-md').innerHTML = `<div class="hint">${esc(r.error || t('读取失败'))}</div>`;
+      return;
+    }
+    v.repoSkills = r.skills;
+    renderRepoSkillList(v);
+    return;
+  }
+  // zip 条目：正文区说明安装方式，点「安装」转交链接安装流程
+  if (v.kind === 'zip') {
+    $('#mkd-install').classList.remove('hidden');
+    $('#mkd-md').innerHTML = `<div class="hint">${tf('「{name}」来自 zip 直链：点「安装」去选安装位置。', { name: v.name })}</div>`;
+    return;
+  }
+  await loadSkillBody(v);
+}
+
+/** 弹窗内的进度/错误提示：mkStatus 写在页面状态栏上，隔着弹窗遮罩根本看不见 */
+function mkdStatus(s) {
+  const el = $('#mkd-status');
+  if (el) el.textContent = s || '';
+}
+
+async function mkInstallDetail() {
+  const v = mkdCurrent;
+  if (!v) return;
+  // zip 条目：转交链接安装流程（勾选页：选位置 → 确认 → 复制）
+  if (v.kind === 'zip') {
+    closeModal('modal-mk-detail');
+    mkInspect({ source: v.source }, v.srcName || 'ZIP');
+    return;
+  }
+  if (!v.owner || !v.repo) return;
+  const destDir = pickerValue($('#mkd-target'));
+  if (!destDir) return toast(t('请先选择安装位置'), 'err');
+  // 装的是别人写的 SKILL：说明与脚本会被 AI 助手读取，这一步必须让人明确确认
+  const okGo = await confirmModal({
+    title: t('安装 SKILL'),
+    message: tf('把「{name}」从 {src} 安装到：\n{dest}\n\nSKILL 里的说明与脚本会被 AI 助手读取并可能执行，请确认来源可信。', {
+      name: v.name,
+      src: v.owner + '/' + v.repo,
+      dest: destDir,
+    }),
+    confirmLabel: t('安装'),
+  });
+  if (!okGo) return;
+
+  const btn = $('#mkd-install');
+  btn.disabled = true;
+  mkdStatus('');
+  const folderOf = (relPath) =>
+    String(relPath || '')
+      .split('/')
+      .filter(Boolean)
+      .pop() ||
+    v.repo ||
+    v.name;
+  let folder = folderOf(v.path);
+  try {
+    // 快路：只取回这一个 SKILL 的目录（几 KB，秒级）
+    mkdStatus(t('取回 SKILL 中…'));
+    const r = await api.invoke('market:fetchSkill', { owner: v.owner, repo: v.repo, path: v.path });
+    if (!r.ok) throw new Error(r.error || '');
+    const c = await api.invoke('skill:copy', { srcPath: r.dir, type: 'folder', destDir, folderName: folder, onConflict: 'rename' });
+    if (!c.ok) throw new Error(c.error || c.reason || '');
+    mkdStatus('');
+    closeModal('modal-mk-detail');
+    toast(tf('已安装「{name}」✓', { name: v.name }), 'ok');
+    await scan();
+    return;
+  } catch (fastErr) {
+    log(t('单技能取回失败：') + (fastErr.message || ''), 'err');
+  }
+  // 慢路：整仓取回。人留在弹窗里等（进度写在弹窗内），装完自动继续 —— 不再把人甩到勾选页
+  try {
+    mkdStatus(t('单技能取回失败，改用整仓方式取回…（仓库大时会久一点）'));
+    const r = await api.invoke('market:inspect', { source: { kind: 'github', owner: v.owner, repo: v.repo, ref: '', path: v.path } });
+    if (!r.ok) throw new Error(r.error || '');
+    // 认回目标 SKILL：优先「目录名与 skillId 同名」的（层级浅者优先），其次 frontmatter
+    // name 同名且不在仓库根的 —— 根目录的 SKILL.md 常是"仓库本身就是个 SKILL"，
+    // 名字撞车时会把整仓内容当成目标装出去（larksuite/cli 实测踩过）。都不中才接受唯一 SKILL。
+    const cands = r.skills || [];
+    const dirName = (s) =>
+      String(s.relPath || '')
+        .split('/')
+        .filter(Boolean)
+        .pop() || '';
+    const byDir = cands
+      .filter((s) => s.relPath && dirName(s) === v.skillId)
+      .sort((a, b) => a.relPath.split('/').filter(Boolean).length - b.relPath.split('/').filter(Boolean).length);
+    const byName = cands.filter((s) => s.name === v.skillId && s.relPath);
+    const hit = byDir[0] || byName[0] || (cands.length === 1 ? cands[0] : null);
+    if (!hit) throw new Error(t('整仓里没有找到这个 SKILL'));
+    // 文件夹名跟着 SKILL 走（skillId），不能用仓库名 —— 勾选页同一套规则（relPath 的尾段）
+    folder = v.skillId || folderOf(hit.relPath) || v.repo;
+    mkdStatus(t('正在安装到所选位置…'));
+    const c = await api.invoke('skill:copy', { srcPath: hit.absPath, type: 'folder', destDir, folderName: folder, onConflict: 'rename' });
+    if (!c.ok) throw new Error(c.error || c.reason || '');
+    mkdStatus('');
+    closeModal('modal-mk-detail');
+    toast(tf('已安装「{name}」✓', { name: v.name }), 'ok');
+    await scan();
+  } catch (err) {
+    // 两条路都失败：错误写在弹窗里（关掉弹窗就看不见了），按钮恢复可点可重试
+    mkdStatus(t('安装失败：') + (err.message || t('未知错误')));
+    toast(t('安装失败：') + (err.message || t('未知错误')), 'err');
+    log(t('安装失败：') + (err.message || ''), 'err');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// 详情弹窗的两个动作按钮。绑一次即可：弹窗是常驻 DOM，不像市场页每次进都重画
+$('#mkd-install').addEventListener('click', mkInstallDetail);
+// 仓库模式：弹窗正文区是 SKILL 清单，点一条加载它的正文与安装按钮（弹窗常驻 DOM，绑一次）
+$('#mkd-md').addEventListener('click', (e) => {
+  const b = e.target.closest('.mkd-skill-item');
+  if (!b || !mkdCurrent || !mkdCurrent.repoSkills) return;
+  const s = mkdCurrent.repoSkills[Number(b.dataset.j)];
+  if (!s) return;
+  mkdCurrent.skillId = s.name;
+  mkdCurrent.path = s.path;
+  loadSkillBody(mkdCurrent);
+});
+$('#mkd-github').addEventListener('click', () => {
+  if (mkdCurrent && mkdCurrent.url) api.invoke('shell:openUrl', { url: mkdCurrent.url });
+});
+
+// 市场检索入口：一个搜索框，一次请求（market:searchAll 聚合 skills.sh / SkillsMP /
+// GitHub / 自定义索引），一次渲染。竞态守卫：只有「最新发起」的检索才有资格渲染 ——
+// 实测热门自动加载与手动搜索并发时，迟到的结果会把列表顶掉。
+let mkSearchSeq = 0;
+
+async function mkSearch(query) {
+  const seq = ++mkSearchSeq;
+  // 无参调用（搜索按钮 / 回车）读输入框；显式传空串 = 进页自动拉热门
+  const q = String(query === undefined ? $('#mk-query').value : query).trim();
   mkStatus(t('搜索中…'));
-  $('#mk-results').innerHTML = '';
-  const r = await api.invoke('market:search', { query });
-  if (!r.ok) return mkFail(r);
-  renderMkRepos(r.items, r.total);
+  // 等待不空屏：转圈立即可见，结果回来整体替换
+  const box = $('#mk-results');
+  if (box) box.innerHTML = `<div class="mk-loading"><span class="mk-spin"></span></div>`;
+  // 自定义索引入口已从界面收掉：显式传空 = 不启用（能力仍保留在主进程，见 src/market.js）
+  const r = await api.invoke('market:searchAll', {
+    query: q,
+    indexUrl: '',
+    category: state.market.category,
+    sortBy: state.market.sortBy,
+  });
+  if (seq !== mkSearchSeq) return; // 期间又发起了新检索，这份结果作废
+  if (!r.ok) {
+    if (box) box.innerHTML = '';
+    return mkFail(r);
+  }
+  // 有来源成功才落 featuredTried —— 全挂（断网等）下次进页重试
+  if (!q && (r.items.length || (r.sources || []).some((s) => s.ok))) state.market.featuredTried = true;
+  state.market.results = { q, items: r.items, sources: r.sources, page: 1, hasMore: true };
+  state.market.shownCount = MK_PAGE;
+  renderMkResults(state.market.results);
+}
+// 点卡片 = 立即打开 GitHub 详情页（不下载）；「安装」才真正取回。
+// URL 只由已校验的 owner/repo/ref/path 组件拼出，zip 直链则要求 https
+function mkEntryUrl(entry) {
+  const s = entry && entry.source;
+  if (!s) return '';
+  if (s.kind === 'github' && s.owner && s.repo) {
+    const p = s.path ? '/' + s.path : '';
+    return `https://github.com/${s.owner}/${s.repo}${s.ref ? '/tree/' + s.ref + p : ''}`;
+  }
+  if (s.kind === 'zip' && /^https:\/\//i.test(s.url || '')) return s.url;
+  return '';
 }
 
-async function mkLoadIndex() {
-  const url = $('#mk-index').value.trim();
-  if (!url) return toast(t('请先填写索引地址'), 'err');
-  await saveMarketCfg();
-  mkStatus(t('加载索引中…'));
-  $('#mk-results').innerHTML = '';
-  const r = await api.invoke('market:index', { url });
-  if (!r.ok) return mkFail(r);
-  mkStatus(r.name ? tf('索引「{name}」', { name: r.name }) + (r.skipped ? tf('（跳过 {n} 条无效记录）', { n: r.skipped }) : '') : '');
+// 结果列表的统一行模板（SkillHub 式：彩色图标 + 名称/徽章 + 描述 + 右侧指标与安装按钮）。
+// 三种来源（GitHub 检索 / 内置市场 / 自定义索引）共用，徽章与指标的取值各自传。
+// 图标颜色由名字哈希出 0-359 色相（--h 交给 CSS 上色），同一 SKILL 每次颜色稳定。
+function mkHue(s) {
+  let h = 0;
+  for (const c of String(s || '')) h = (h * 31 + c.codePointAt(0)) % 360;
+  return h;
+}
+
+function mkRowHtml({ i, avatar, name, chip, tags = [], desc, metric, owner, srcName, dup = false }) {
+  const tagChips = (tags || []).map((tg) => `<span class="chip">${esc(tg)}</span>`).join('');
+  // 首字母图标打底，owner 头像取回来就盖在上面（拿不到就留字母，不留破图）
+  const img = owner ? `<img class="mk-avatar-img" alt="" data-owner="${esc(owner)}" />` : '';
+  return `<div class="mk-row" ${i !== undefined ? `data-i="${i}"` : ''}>
+      <span class="mk-avatar" style="--h:${mkHue(name)}">${esc(avatar || '?')}${img}</span>
+      <div class="mk-row-main">
+        <div class="mk-row-top">
+          <span class="mk-row-name">${esc(name || '?')}</span>
+          ${chip ? `<span class="mk-row-chip" title="${esc(chip)}">${esc(chip)}</span>` : ''}
+          ${tagChips}
+          ${dup ? `<span class="mk-dup" title="${t('本机已有同名 SKILL，不一定是同一个')}">${t('同名已存在')}</span>` : ''}
+        </div>
+        <div class="mk-row-desc">${esc(desc || '') || t('暂无描述')}</div>
+      </div>
+      <div class="mk-row-side">
+        ${metric ? `<span class="mk-metric">${esc(metric)}</span>` : ''}
+        ${srcName ? `<span class="mk-row-src">${esc(srcName)}</span>` : ''}
+        <button class="btn sm mk-act-install">${t('安装')}</button>
+      </div>
+    </div>`;
+}
+
+/** 列表画完后异步贴 owner 头像：主进程有缓存，重复渲染不会重复拉 */
+function mkLoadAvatars() {
+  $$('#mk-results .mk-avatar-img').forEach(async (img) => {
+    const r = await api.invoke('market:avatar', { owner: img.dataset.owner });
+    if (r && r.ok && img.isConnected) img.src = r.dataUrl;
+  });
+}
+
+/** 聚合列表渲染：列表只等站点接口（秒级），描述不阻塞渲染 —— 行先画出来，
+    描述由 mkBackfillDescs 按行回填（四源竞速，不占 GitHub 配额）。行高固定，
+    回填只改一行文字，没有布局跳动。状态行说明总数与来源构成。 */
+function renderMkResults(res) {
+  const featured = !res.q;
+  mkSectionTitle(featured ? t('热门 SKILL') : t('检索结果'));
   const box = $('#mk-results');
-  if (!r.items.length) {
-    box.innerHTML = `<div class="mk-empty">${t('索引里没有可用的条目。')}</div>`;
+  if (!box) return; // 页面已被切走：状态留原处，回来时按 state 重画
+  const items = res.items || [];
+  if (!items.length) {
+    box.innerHTML = `<div class="mk-empty">${t('没有找到 SKILL。<br>换个关键词，或点「从 GitHub 安装」粘贴仓库链接直接读取。')}</div>`;
+    mkStatus('');
     return;
   }
-  box.innerHTML = r.items
-    .map(
-      (it, i) => `<div class="mk-repo mk-index-item" data-i="${i}">
-      <div class="mk-repo-name">${esc(it.name)}${(it.tags || []).map((tg) => `<span class="chip">${esc(tg)}</span>`).join('')}</div>
-      <div class="mk-repo-desc">${esc(it.description) || t('（无描述）')}</div>
-      <div class="mk-repo-meta"><span>${esc(it.source.kind === 'github' ? `${it.source.owner}/${it.source.repo}${it.source.path ? '/' + it.source.path : ''}` : it.source.url)}</span></div>
-    </div>`
-    )
-    .join('');
-  state.market.indexItems = r.items;
+  const shown = items.slice(0, state.market.shownCount || MK_PAGE);
+  // 状态行 = 已加载数 + 来源构成：用户不用数行数也能知道这次聚合到了什么
+  const head = items.length > shown.length ? tf('已显示 {m} / 共 {n} 个', { n: items.length, m: shown.length }) : '';
+  const srcParts = (res.sources || []).map((s) => (s.ok ? `${s.name} ×${s.count}` : `${s.name} ${t('未返回')}`));
+  mkStatus([head, srcParts.join(' · ')].filter(Boolean).join(' · '));
+  let html = '';
+  let repoDiv = false;
+  // 本机已装过的名字集合：与勾选页的「同名已存在」同一套判据与视觉
+  const localNames = new Set(state.skills.map((s) => s.name));
+  shown.forEach((it, i) => {
+    // SKILL 在前、仓库在后：仓库条目插一条分隔行，列表结构一眼可读
+    if (it.kind === 'repo' && !repoDiv) {
+      repoDiv = true;
+      if (shown.some((x) => x.kind !== 'repo')) html += `<div class="mk-row-kind">${t('相关仓库（整仓安装）')}</div>`;
+    }
+    const chip = it.kind === 'repo' ? '' : it.owner && it.repo ? it.owner + '/' + it.repo : '';
+    html += mkRowHtml({
+      i,
+      avatar: (it.name || '?').slice(0, 1).toUpperCase(),
+      name: it.name,
+      chip,
+      tags: it.tags,
+      desc: it.description,
+      metric: it.installs ? `⬇ ${fmtMkNum(it.installs)}` : it.stars ? `★ ${fmtMkNum(it.stars)}` : '',
+      owner: it.owner,
+      srcName: it.srcName,
+      dup: it.kind === 'skill' && localNames.has(it.name),
+    });
+  });
+  // 分页脚注：本地还有存货就直接展开；本地耗尽就拉下一页；确认没有更多就明说
+  if (items.length > shown.length || res.hasMore !== false) {
+    html += `<div class="mk-more-wrap">${
+      res.hasMore === false && items.length <= shown.length
+        ? `<span class="hint">${t('没有更多了')}</span>`
+        : `<button class="btn sm mk-more">${t('加载更多')}</button>`
+    }</div>`;
+  }
+  box.innerHTML = html;
+  mkLoadAvatars();
+  mkBackfillDescs(res);
 }
 
-// 选中一个来源（仓库 / 索引条目 / 粘贴的链接）→ 下载解压 → 列出其中的 SKILL。
-// payload 直接交给主进程：链接怎么解析只在 src/market.js 里有一份实现
-async function mkInspect(payload, label) {
+/** 条目的稳定 key：跨页合并时识别同一条目，避免「加载更多」装进重复行 */
+function mkItemKey(it) {
+  if (it.kind === 'repo') return 'repo:' + (it.owner || '') + '/' + (it.repo || '');
+  if (it.kind === 'zip') return 'zip:' + ((it.source && it.source.url) || it.name);
+  return (it.owner || '') + '/' + (it.repo || '') + '|' + (it.path || it.skillId || it.name);
+}
+
+/** 加载更多：先看本地池里还有没有没展示的（零网络），耗尽才按页拉下一页并去重合并。
+    拉回来全是重复 = 真的没有更多了，按钮就此消失。 */
+async function mkMore() {
+  const res = state.market.results;
+  if (!res || res.hasMore === false) return;
+  const seq = mkSearchSeq;
+  const cur = state.market.shownCount || MK_PAGE;
+  // 本地还有存货：直接展开，零网络
+  if (res.items.length > cur) {
+    state.market.shownCount = cur + MK_PAGE;
+    renderMkResults(res);
+    return;
+  }
+  const btn = $('#mk-results .mk-more');
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = `<span class="mk-spin sm"></span>${t('加载中…')}`;
+  }
+  // 自定义索引入口已从界面收掉：显式传空 = 不启用
+  const r = await api.invoke('market:searchAll', {
+    query: res.q,
+    indexUrl: '',
+    category: state.market.category,
+    sortBy: state.market.sortBy,
+    page: (res.page || 1) + 1,
+  });
+  if (seq !== mkSearchSeq) return; // 期间发起了新检索，这次翻页作废
+  if (!r.ok) {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = t('加载更多');
+    }
+    return;
+  }
+  const seen = new Set(res.items.map(mkItemKey));
+  const fresh = (r.items || []).filter((it) => !seen.has(mkItemKey(it)));
+  res.page = (res.page || 1) + 1;
+  if (!fresh.length) {
+    res.hasMore = false;
+    renderMkResults(res);
+    return;
+  }
+  res.items = res.items.concat(fresh);
+  state.market.shownCount = cur + MK_PAGE;
+  renderMkResults(res);
+}
+
+/** 描述回填：只补已展示行里没有描述的 SKILL 条目，并发 6 按行填充。
+    主进程四源竞速取 SKILL.md（skillCache 缓存 24h），不占 api.github.com 配额；
+    新检索发起后（seq 变化）立刻停手，迟到的回填不会写进新列表。 */
+async function mkBackfillDescs(res) {
+  const seq = mkSearchSeq;
+  const items = (res.items || []).slice(0, state.market.shownCount || MK_PAGE);
+  const jobs = [];
+  items.forEach((it, i) => {
+    if (it.kind === 'skill' && it.owner && !it.description) jobs.push({ it, i });
+  });
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(6, jobs.length) }, async () => {
+    while (cursor < jobs.length) {
+      if (seq !== mkSearchSeq) return; // 新检索已发起，这轮回填作废
+      const { it, i } = jobs[cursor++];
+      const r = await api.invoke('market:resolveOne', { owner: it.owner, repo: it.repo, skillId: it.skillId, path: it.path });
+      if (seq !== mkSearchSeq || !r || !r.ok || !r.description) continue;
+      it.description = r.description;
+      if (r.path) it.path = r.path;
+      const row = document.querySelector(`#mk-results .mk-row[data-i="${i}"]`);
+      const el = row && row.querySelector('.mk-row-desc');
+      if (el && el.textContent === t('暂无描述')) el.textContent = r.description;
+    }
+  });
+  await Promise.all(workers);
+}
+
+// payload 直接交给 主进程：链接怎么解析只在 src/market.js 里有一份实现
+async function mkInspect(payload, label, { preferSkillId } = {}) {
   mkStatus(t('下载并解压中…（仓库大时会久一点）'));
   const r = await api.invoke('market:inspect', payload);
   if (!r.ok) return mkFail(r);
+  mkShowPick(r, label, { preferSkillId });
+}
+
+// 拿到 inspect 结果后的勾选页渲染：市场页与「从 GitHub 安装」弹窗共用，
+// 弹窗那条路已经下载过一次，绝不能让它再下一遍
+function mkShowPick(r, label, { preferSkillId } = {}) {
   state.market.skills = r.skills || [];
   // 默认全选：用户是冲着这个来源点进来的，一个个勾太啰嗦；底部会显示已选数量
   state.market.selected = new Set(state.market.skills.map((s) => s.absPath));
+  // 内置市场点的是站里的一条：只预选站里那条对应的 SKILL，同仓的其余照旧可勾
+  if (preferSkillId) {
+    const hit = state.market.skills.find((s) => s.name === preferSkillId || (s.relPath || '').split('/').pop() === preferSkillId);
+    if (hit) state.market.selected = new Set([hit.absPath]);
+  }
   state.market.active = null;
-  $('#mk-source').textContent = label || r.label || '';
+  state.market.source = label || r.label || '';
+  if (!mkAlive()) return; // 先落 state 再画 DOM：页面不在就到此为止，回来时按 state 恢复
+  $('#mk-source').textContent = state.market.source;
   $('#mk-preview').innerHTML = '';
   showMkStep('pick');
   renderMkList();
+  // 安装位置选择器必须在这里填：勾选页每次进都重画，恢复路径之外这是唯一入口。
+  // 漏了它「安装选中的 SKILL」会永远提示「请先选择安装位置」（实测踩过）。
+  fillTargetPicker($('#mk-target'));
   mkStatus(state.market.skills.length ? tf('共 {n} 个 SKILL，默认全选', { n: state.market.skills.length }) : '');
 }
 
@@ -2781,6 +3460,7 @@ function renderMkList() {
   // 而不是「已安装」——后者会让人以为装过了、从而跳过安装
   const sameName = new Set(state.skills.map((s) => s.name));
   const list = $('#mk-list');
+  if (!list) return; // 页面已被切走
   if (!state.market.skills.length) {
     list.innerHTML = `<li class="mk-empty">${t('这个来源里没有找到 SKILL.md。')}</li>`;
     updateMkInstall();
@@ -2791,82 +3471,41 @@ function renderMkList() {
       (s) => `<li class="mk-item" data-path="${esc(s.absPath)}">
       <input type="checkbox" ${state.market.selected.has(s.absPath) ? 'checked' : ''} />
       <div class="mk-item-main">
-        <div class="mk-item-name">${esc(s.name)}${sameName.has(s.name) ? `<span class="chip" title="${t('本机已有同名 SKILL，不一定是同一个')}">${t('同名已存在')}</span>` : ''}</div>
-        <div class="mk-item-desc" title="${esc(s.description)}">${esc(s.description) || t('（无描述）')} · ${s.fileCount} ${t('个文件')}</div>
+        <div class="mk-item-name">${esc(s.name)}${sameName.has(s.name) ? `<span class="mk-dup" title="${t('本机已有同名 SKILL，不一定是同一个')}">${t('同名已存在')}</span>` : ''}</div>
+        <div class="mk-item-desc" title="${s.description ? esc(s.description) : ''}">${esc(s.description) || t('（无描述）')} · ${s.fileCount} ${t('个文件')}</div>
       </div>
     </li>`
     )
     .join('');
   updateMkInstall();
+  // 右侧预览别空着：没有选中项就预览第一个；从别的页面回来（active 还在）也要把预览画回来
+  if (state.market.skills.length) {
+    const active = state.market.skills.find((s) => s.absPath === state.market.active) || state.market.skills[0];
+    state.market.active = active.absPath;
+    const li = $(`#mk-list .mk-item[data-path="${CSS.escape(active.absPath)}"]`);
+    if (li) li.classList.add('active');
+    if (!$('#mk-preview').innerHTML) mkPreview(active);
+  }
 }
 
 function updateMkInstall() {
-  const n = state.market.selected.size;
   const btn = $('#mk-install');
+  if (!btn) return;
+  const n = state.market.selected.size;
   btn.disabled = n === 0;
   btn.textContent = n ? tf('安装选中的 {n} 个', { n }) : t('安装选中的 SKILL');
 }
 
 async function mkPreview(skill) {
   const box = $('#mk-preview');
+  if (!box) return;
   box.innerHTML = `<div class="hint">${t('读取中…')}</div>`;
   const r = await api.invoke('skill:read', { path: skill.skillMdPath });
+  if (!box.isConnected) return; // 等正文读回来时页面可能已被切走
   box.innerHTML = r.ok ? api.md(r.body) : `<div class="hint">${t('读取失败：')}${esc(r.error || '')}</div>`;
 }
 
-$('#mk-list').addEventListener('click', (e) => {
-  const li = e.target.closest('.mk-item');
-  if (!li) return;
-  const p = li.dataset.path;
-  // 勾选框只管勾选，点行本身只看预览——两个动作别混在一起
-  if (e.target.tagName === 'INPUT') {
-    if (e.target.checked) state.market.selected.add(p);
-    else state.market.selected.delete(p);
-    updateMkInstall();
-    return;
-  }
-  $$('#mk-list .mk-item').forEach((el) => el.classList.toggle('active', el === li));
-  const skill = state.market.skills.find((s) => s.absPath === p);
-  if (skill) mkPreview(skill);
-});
-
-$('#mk-results').addEventListener('click', (e) => {
-  const repo = e.target.closest('.mk-repo:not(.mk-index-item)');
-  if (repo) {
-    const owner = repo.dataset.owner;
-    const name = repo.dataset.repo;
-    return mkInspect({ source: { kind: 'github', owner, repo: name, ref: '' } }, owner + '/' + name);
-  }
-  const idx = e.target.closest('.mk-index-item');
-  if (idx) {
-    const entry = (state.market.indexItems || [])[Number(idx.dataset.i)];
-    if (entry) mkInspect({ source: entry.source }, entry.name);
-  }
-});
-
-$('#mk-go').addEventListener('click', mkSearchGithub);
-$('#mk-query').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') mkSearchGithub();
-});
-$('#mk-go-index').addEventListener('click', mkLoadIndex);
-$('#mk-index').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') mkLoadIndex();
-});
-$('#mk-go-url').addEventListener('click', () => {
-  const raw = $('#mk-url').value.trim();
-  if (!raw) return;
-  // 不在渲染层解析：认不出来的地址由主进程给出统一的错误，避免两份解析器漂移
-  mkInspect({ raw }, raw);
-});
-$('#mk-url').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') $('#mk-go-url').click();
-});
-$('#mk-back').addEventListener('click', () => {
-  showMkStep('find');
-  mkStatus('');
-});
-
-$('#mk-install').addEventListener('click', async () => {
+async function mkInstall() {
   const destDir = pickerValue($('#mk-target'));
   if (!destDir) return toast(t('请先选择安装位置'), 'err');
   const picked = state.market.skills.filter((s) => state.market.selected.has(s.absPath));
@@ -2912,12 +3551,14 @@ $('#mk-install').addEventListener('click', async () => {
     return;
   }
   toast(tf('已安装 {n} 个 SKILL ✓', { n: done }), 'ok');
-  closeModal('modal-market');
+  // 回到「找」那一步：结果列表还在原地，可以接着挑下一个来源装
+  showMkStep('find');
+  mkStatus('');
   if (isProjectTarget(destDir)) {
     const proj = state.projects.find((p) => destDir.startsWith(p.dir));
     if (proj) setFilter('project:' + proj.id);
   }
-});
+}
 
 // ------------------------------ 启动 -----------------------------------------
 // 自动备份的结果由主进程推送。**必须最先注册**：主进程在窗口 did-finish-load 后才起调度，

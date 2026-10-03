@@ -44,6 +44,7 @@ Installing one SKILL for every agent means N divergent copies. CC Skill fixes th
 - 🧹 **Merge duplicates** — finds the same SKILL copied into multiple directories and collapses them into "1 canonical copy + N links" (safe delete to Recycle Bin, retry & copy-fallback built in)
 - 🗂 **Project scopes** — register project folders (e.g. `your-repo/.claude/skills`) and move SKILLs between global and project scopes; project installs always use copies (git-safe)
 - 📊 **Dashboard** — counts, per-agent / per-project distribution, recent activity; missing skill directories are named right on their chips, and the dashboard's "N directories missing" count clicks through to the agent's view
+- 🛒 **Skill Market** — a first-class sidebar page with three sources: **built-in markets** (skills.sh, SkillsMP; the registry is extensible) searched by installs / stars, **GitHub** search and paste-a-link, and a **custom market** loading an index JSON. One two-step install for all of them: download and unpack → list every SKILL inside → preview `SKILL.md`, tick, install into any agent directory (with an explicit source-and-risk confirmation)
 - ☁️ **WebDAV backup & restore** — bring your own server (坚果云 / Nextcloud / Alist …), one-click snapshot of every physical SKILL, restore to the same directories on any machine
 - 🖥️ **Machine identity & profiles** — the cloud keeps one folder per machine, so how many backups each one has is plain to see; restore / rename / claim / delete a machine. After a fresh OS install, tick "this is this computer" in the restore dialog and project entries plus the project skills under them come back too. Configs can be exported to a file and imported from one
 - 🧾 **Operation log** — every action is recorded in-app and appended to `cc-skill.log` next to the app
@@ -126,12 +127,12 @@ Done:
 
 - [x] Scheduled / auto backup — startup / daily / weekly, and it only uploads when the content actually changed
 - [x] macOS symlink support — a dmg ships with each Release; Windows keeps using junctions
-- [x] SKILL marketplace / one-click install from Git — Discover: search repositories, paste links, load an index
+- [x] SKILL marketplace / one-click install from Git — the sidebar "Skill Market": built-in markets (skills.sh / SkillsMP) + GitHub search + custom index
 - [x] Multi-language UI — 中文 / English, following the system or picked manually
 
 Next:
 
-- [ ] One-click SKILL updates: remember where each installed-from-Discover SKILL came from and at what version, check for updates in one click
+- [ ] One-click SKILL updates: remember where each market-installed SKILL came from and at what version, check for updates in one click
 - [ ] Linux packaging (AppImage / deb) — the symlink logic is ready; only the packaged build is missing
 - [ ] Diff before merge / restore: see what changes before collapsing duplicates or restoring a backup
 - [ ] Backup encryption: if the WebDAV folder is ever shared, the archive contents stay unreadable

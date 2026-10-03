@@ -170,12 +170,12 @@ test('styles.css 里有通用的 .hidden 规则', () => {
 });
 
 test('确认弹窗的层级高于业务弹窗（不能靠 DOM 顺序）', () => {
-  // 市场弹窗在 DOM 里排在确认弹窗之后，不给确认弹窗显式抬层级的话，
-  // 点「安装」弹出的确认框会被压在下面，按钮点不到 —— 安装流程整个卡住。
+  // 市场弹窗当年在 DOM 里排在确认弹窗之后，不给确认弹窗显式抬层级的话，点「安装」
+  // 弹出的确认框会被压在下面。市场如今是侧栏页，用同样排在后面的 add-agent 弹窗守住前提。
   assert.match(css, /#modal-confirm\s*\{\s*z-index:\s*\d+/, '确认弹窗需要显式 z-index');
   const confirmAt = html.indexOf('id="modal-confirm"');
-  const marketAt = html.indexOf('id="modal-market"');
-  assert.ok(confirmAt > 0 && marketAt > 0 && marketAt > confirmAt, '市场弹窗确实是排在确认弹窗之后的那个（这条测试的前提）');
+  const addAgentAt = html.indexOf('id="modal-add-agent"');
+  assert.ok(confirmAt > 0 && addAgentAt > 0 && addAgentAt > confirmAt, 'add-agent 弹窗确实是排在确认弹窗之后的那个（这条测试的前提）');
 });
 
 test('类选择器一律限定作用域（跨弹窗撞类会把处理器绑错）', () => {
@@ -299,13 +299,65 @@ test('新加的界面文案都有英文对照（英文环境下不会掉出中�
     '从文件导入配置',
     '云端根目录固定为 cc-skill-sync，每台机器在它下面各占一个子目录；多台机器共用一个网盘也不会互相覆盖。',
     '本机还没有云端备份 —— 请先选一台机器，再挑它的备份',
-    '链路通（{ms} ms），目标返回 HTTP {s}：多为 GitHub 匿名限流（每小时 60 次），在「发现」里填个 Token 即可',
+    '链路通（{ms} ms），目标返回 HTTP {s}',
     // 缺失目录的标记
     '目录不存在',
     '点击查看缺失的目录',
+    // SKILL 市场（侧栏页，聚合检索）
+    'SKILL 市场',
+    '热门 SKILL',
+    '检索结果',
+    '发现并安装社区 SKILL，一次检索，聚合所有来源',
+    '从 GitHub 安装',
+    'Token 设置',
+    'GitHub Token（可选）',
+    '返回',
+    '输入关键词开始检索',
+    '未返回',
+    '相关仓库（整仓安装）',
   ]) {
     assert.ok(dict.includes(`'${key}':`) || dict.includes(`"${key}":`), 'i18n.js 缺少词条：' + key);
   }
+});
+
+// ------------------------------ SKILL 市场（侧栏页） --------------------------
+test('SKILL 市场是侧栏页：一个搜索框聚合所有来源', () => {
+  // 三来源页签并成一个搜索框：来源只是行上的徽章，检索在主进程聚合
+  assert.match(html, /data-filter="market"/, '侧栏要有 SKILL 市场这一项');
+  assert.match(appJs, /function renderMarketPage\(\)/, '市场页要有自己的渲染函数');
+  assert.match(appJs, /function bindMarketPage\(\)/, '页面重画后事件要重挂（不能留在模块加载期）');
+  for (const gone of ['data-mk-src=', 'mk-pane-', 'mk-query-b', 'mk-go-b', 'mk-go-index', 'selectMkSource', 'mk-adv', 'mk-token', 'mk-index', 'mk-go-url']) {
+    assert.ok(!appJs.includes(gone), '旧来源入口必须清掉：' + gone);
+  }
+  // 聚合检索走 market:searchAll；站点注册表仍从主进程拉（快捷标签）
+  assert.match(appJs, /market:searchAll/, '聚合检索要走新通道');
+  assert.match(appJs, /market:listBuiltin/, '快捷标签的站点注册表要从 market:listBuiltin 拉取');
+  // 官网式首页：进页自动拉热门 + 快捷标签 + 节标题 + 头像行，不能一上来空空如也
+  assert.match(appJs, /mk-tags/, '要有快捷标签行');
+  assert.match(appJs, /featuredTried/, '热门只自动拉一次，失败下次进页重试');
+  assert.match(appJs, /mk-sec-head/, '结果区要有节标题行');
+  assert.match(appJs, /mk-avatar/, '结果行要有首字母头像');
+  assert.match(css, /\.mk-tag\s*\{/, '缺快捷标签样式');
+  assert.match(css, /\.mk-avatar\s*\{/, '缺头像样式');
+  assert.match(css, /\.mk-sec-head\s*\{/, '缺节标题样式');
+  assert.match(css, /\.mk-spin\s*\{/, '缺检索等待的转圈动画样式');
+  assert.match(css, /\.mk-dup\b/, '缺「同名已存在」强调徽章样式');
+  assert.match(appJs, /localNames/, '结果行要按本机已装名单标记「同名已存在」');
+  assert.match(html, /modal-mkgh/, '从 GitHub 安装要有自己的弹窗');
+  assert.match(appJs, /modal-mkgh/, '弹窗要从市场页打开');
+  assert.match(html, /set-gh-token/, 'GitHub Token 要迁到设置页');
+  assert.match(appJs, /set-gh-token/, '设置页要填存好的 Token');
+  assert.match(css, /\.mkd-skill-item\b/, '缺仓库模式 SKILL 清单样式');
+  // 详情弹窗：skill/repo/zip 三种条目都进同一个弹窗
+  assert.match(appJs, /market:repoSkills/, '仓库条目要拉仓库 SKILL 清单');
+  assert.match(appJs, /function mkEntryUrl\(/, '要有条目 URL 构造器');
+  assert.match(appJs, /shell:openUrl/, '「在 GitHub 查看」要走 shell:openUrl');
+  assert.match(appJs, /mk-act-install/, '行上要有独立的「安装」按钮');
+  assert.match(appJs, /stopPropagation\(\)/, '安装按钮不能冒泡成「打开详情」');
+  // 弹窗时代的遗骸必须清掉，否则 id 契约测试会替我们拦下——但语义要写明
+  assert.ok(!html.includes('modal-market'), '发现弹窗应当删除');
+  assert.ok(!html.includes('btn-market'), '顶栏「发现」按钮应当删除');
+  assert.ok(!appJs.includes("openModal('modal-market')"), '市场不再走 openModal');
 });
 
 // ------------------------------ 机器身份 --------------------------------------
@@ -359,7 +411,9 @@ test('认领与重置走同一个写入点，身份不接受任意字符串', ()
 // ~/.agents/skills 还会在 Codex 和 ZCode 下各出现一次，看着像两条不同的目标。
 test('目标目录用自绘下拉，不再是原生 select', () => {
   for (const id of ['copy-dir', 'new-dir', 'import-target', 'mk-target']) {
-    assert.match(html, new RegExp(`id="${id}" class="picker"`), `#${id} 应当是 .picker 容器`);
+    // mk-target 随市场页长在 app.js 的模板里（弹窗删了），其余仍在 index.html
+    const re = new RegExp(`id="${id}" class="picker"`);
+    assert.ok(re.test(html) || re.test(appJs), `#${id} 应当是 .picker 容器`);
     assert.ok(!html.includes(`<select id="${id}"`), `#${id} 不该还是原生 select`);
   }
 });
