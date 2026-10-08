@@ -38,6 +38,31 @@ test('scan 能同时发现文件夹型与单文件型 SKILL，并读出 frontmat
   assert.equal(alpha.project, undefined);
   const flat = r.skills.find((s) => s.name === 'flat-one');
   assert.equal(flat.type, 'file');
+  // 单文件 SKILL 的 absPath/key 必须是 .md 本身，parentDir 才是所在技能目录：
+  // 删除/迁移链路拿 absPath 直接操作磁盘，曾是技能目录时会把整个目录搬进回收站
+  assert.equal(flat.absPath, path.join(agentDir, 'flat-one.md'));
+  assert.equal(flat.parentDir, agentDir);
+  assert.equal(flat.key, flat.absPath);
+});
+
+test('删除单文件 SKILL 只移除 .md 本身，同目录其他 SKILL 不受影响', async () => {
+  writeFlatSkill(agentDir, 'flat-doomed');
+  const scanned = await app.invoke('scan');
+  const flat = scanned.skills.find((s) => s.name === 'flat-doomed');
+  assert.ok(flat, 'scan 应能发现单文件 SKILL');
+  const r = await app.invoke('skill:trash', { path: flat.absPath });
+  assert.equal(r.ok, true);
+  assert.ok(!fs.existsSync(path.join(agentDir, 'flat-doomed.md')));
+  assert.ok(fs.existsSync(path.join(agentDir, 'alpha', 'SKILL.md')), '同目录的文件夹型 SKILL 必须完好');
+  assert.ok(fs.existsSync(path.join(agentDir, 'flat-one.md')), '同目录的其他单文件 SKILL 必须完好');
+});
+
+test('skill:copy 按 scan 返回的 absPath 复制单文件 SKILL', async () => {
+  const scanned = await app.invoke('scan');
+  const flat = scanned.skills.find((s) => s.name === 'flat-one');
+  const r = await app.invoke('skill:copy', { srcPath: flat.absPath, type: flat.type, destDir: otherDir, folderName: flat.folder });
+  assert.equal(r.ok, true);
+  assert.ok(fs.existsSync(path.join(otherDir, 'flat-one.md')));
 });
 
 test('scan 会报告缺失的技能目录', async () => {
@@ -207,4 +232,17 @@ test('skill:trash 对不存在的路径返回错误而不是抛异常', async ()
   const r = await app.invoke('skill:trash', { path: path.join(otherDir, 'nope-nope') });
   assert.equal(r.ok, false);
   assert.match(r.error, /路径不存在/);
+});
+
+test('skill:trash 拒绝把登记的技能目录本身送进回收站', async () => {
+  // 兜底保险：上游把 absPath 错填成技能目录时，损失是整目录级的数据丢失，必须在 IPC 边界拦下
+  const r = await app.invoke('skill:trash', { path: agentDir });
+  assert.equal(r.ok, false);
+  assert.ok(fs.existsSync(path.join(agentDir, 'alpha', 'SKILL.md')), '技能目录必须原封不动');
+});
+
+test('skill:move 拒绝以登记的技能目录为迁移源', async () => {
+  const r = await app.invoke('skill:move', { srcPath: agentDir, type: 'file', destDir: otherDir, folderName: 'x', onConflict: 'rename' });
+  assert.equal(r.ok, false);
+  assert.ok(fs.existsSync(path.join(agentDir, 'alpha', 'SKILL.md')), '技能目录必须原封不动');
 });

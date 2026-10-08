@@ -27,6 +27,7 @@ const {
 const { httpGet } = require('./net');
 const market = require('./market');
 const {
+  PROJECT_SUBDIR_AGENTS,
   parseFrontmatter,
   firstParagraph,
   countFiles,
@@ -94,6 +95,20 @@ function registerIpcHandlers({ getWindow, appDir, userData, applyProxy }) {
   });
 
   // ------------------------------ 技能操作 -----------------------------------
+  // 渲染层传来的待删/待迁路径若「本身就是登记的技能目录」，删的就不是某个 SKILL 而是整个目录。
+  // 真机发生过两次：单文件 SKILL 的 absPath 曾被填成技能目录，~/.claude/skills 整体进了回收站。
+  // 在 IPC 边界兜底拒绝，任何上游路径 bug 到这里都退化成一次报错，而不是数据丢失
+  const normCase = (p) => path.resolve(String(p || '')).replace(/[\\/]+/g, '/').replace(/\/+$/, '').toLowerCase();
+  const isRegisteredSkillDir = (p) => {
+    const cfg = getConfig();
+    const dirs = [];
+    for (const a of cfg.agents || []) for (const d of a.dirs || []) dirs.push(expand(d));
+    for (const proj of cfg.projects || []) {
+      for (const sub of Object.keys(PROJECT_SUBDIR_AGENTS)) dirs.push(expand(path.join(expand(proj.dir), sub, 'skills')));
+    }
+    return dirs.some((d) => normCase(d) === normCase(p));
+  };
+
   handle('skill:read', ({ path: p }) => readSkill(p));
   handle('skill:write', ({ path: p, content }) => writeSkill(p, content));
   handle('skill:files', ({ dir, type }) => listSkillFiles(dir, type));
@@ -106,10 +121,14 @@ function registerIpcHandlers({ getWindow, appDir, userData, applyProxy }) {
   });
   handle('skill:copy', (args) => copySkill(args));
   // 迁移本体：源路径、目标目录与冲突策略同 skill:copy；trashItem 注入方式也一致（回收站，不硬删）
-  handle('skill:move', ({ srcPath, type, destDir, folderName, onConflict, leaveLink }) =>
-    moveSkill({ srcPath, type, destDir, folderName, onConflict, leaveLink }, { trashItem: (abs) => shell.trashItem(abs) })
-  );
-  handle('skill:trash', ({ path: p }) => trashSkill(p, { trashItem: (abs) => shell.trashItem(abs) }));
+  handle('skill:move', ({ srcPath, type, destDir, folderName, onConflict, leaveLink }) => {
+    if (isRegisteredSkillDir(srcPath)) return { ok: false, reason: 'is-skill-dir', error: '源路径本身就是登记的 SKILL 目录，已拒绝迁移' };
+    return moveSkill({ srcPath, type, destDir, folderName, onConflict, leaveLink }, { trashItem: (abs) => shell.trashItem(abs) });
+  });
+  handle('skill:trash', ({ path: p }) => {
+    if (isRegisteredSkillDir(p)) return { ok: false, error: '目标本身就是登记的 SKILL 目录，已拒绝删除（防止整个目录进回收站）' };
+    return trashSkill(p, { trashItem: (abs) => shell.trashItem(abs) });
+  });
   handle('skill:create', (args) => createSkill(args));
   handle('skill:compare', ({ pathA, pathB }) => compareSkills({ pathA, pathB }));
 

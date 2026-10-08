@@ -137,10 +137,13 @@ function makeSkill(absDir, type, folder, agentIds, mdPath) {
   } catch (_) {
     /* ignore */
   }
+  // 单文件 SKILL 的 absPath 是 .md 文件本身（parentDir 才是所在技能目录）：
+  // 删除/迁移/复制链路都拿 absPath 直接操作磁盘，填成技能目录会把整个目录搬进回收站
+  const selfPath = type === 'file' ? mdPath : absDir;
   return {
-    key: absDir,
-    absPath: absDir,
-    parentDir: path.dirname(absDir),
+    key: selfPath,
+    absPath: selfPath,
+    parentDir: type === 'file' ? absDir : path.dirname(absDir),
     folder,
     type,
     skillMdPath: mdPath,
