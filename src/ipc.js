@@ -98,7 +98,12 @@ function registerIpcHandlers({ getWindow, appDir, userData, applyProxy }) {
   // 渲染层传来的待删/待迁路径若「本身就是登记的技能目录」，删的就不是某个 SKILL 而是整个目录。
   // 真机发生过两次：单文件 SKILL 的 absPath 曾被填成技能目录，~/.claude/skills 整体进了回收站。
   // 在 IPC 边界兜底拒绝，任何上游路径 bug 到这里都退化成一次报错，而不是数据丢失
-  const normCase = (p) => path.resolve(String(p || '')).replace(/[\\/]+/g, '/').replace(/\/+$/, '').toLowerCase();
+  const normCase = (p) =>
+    path
+      .resolve(String(p || ''))
+      .replace(/[\\/]+/g, '/')
+      .replace(/\/+$/, '')
+      .toLowerCase();
   const isRegisteredSkillDir = (p) => {
     const cfg = getConfig();
     const dirs = [];
