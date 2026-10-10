@@ -103,7 +103,8 @@ jobs:
           if (!files.length) throw new Error('artifacts 里没有安装包');
           const platforms = {};
           for (const f of files) {
-            const url = `https://github.com/${repo}/releases/download/v${version}/${encodeURIComponent(f)}`;
+            // GitHub 会把资产名里的空格替换成点（CC Skill Setup.exe → CC.Skill.Setup.exe），URL 必须按替换后的名字拼
+            const url = `https://github.com/${repo}/releases/download/v${version}/${encodeURIComponent(f.replace(/ /g, '.'))}`;
             if (/\.exe$/i.test(f)) platforms.win32 = url;
             else if (/arm64\.dmg$/i.test(f)) platforms['darwin-arm64'] = url;
             else if (/\.dmg$/i.test(f)) platforms['darwin-x64'] = url;
