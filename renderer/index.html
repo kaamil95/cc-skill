@@ -130,6 +130,27 @@
     </div>
   </div>
 
+  <!-- 文件编辑弹窗（详情弹窗「文件」页签里点文件打开；可在弹窗层叠时编辑 SKILL 目录下任意文件） -->
+  <div class="modal-overlay hidden" id="modal-file-edit">
+    <div class="modal modal-wide">
+      <div class="modal-head">
+        <div class="modal-title" id="file-edit-title">文件</div>
+        <button class="modal-close" data-close="modal-file-edit">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="editor-wrap">
+          <pre id="file-editor-hl" aria-hidden="true"></pre>
+          <textarea id="file-editor" spellcheck="false"></textarea>
+        </div>
+        <div id="file-edit-status" class="json-status hidden"></div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn" data-close="modal-file-edit" data-i18n="取消">取消</button>
+        <button class="btn primary" id="btn-save-file" data-i18n="保存修改">保存修改</button>
+      </div>
+    </div>
+  </div>
+
   <!-- 复制到 Agent 弹窗 -->
   <div class="modal-overlay hidden" id="modal-copy">
     <div class="modal">
@@ -287,6 +308,7 @@
         <button class="tab" data-set-tab="config" data-i18n="配置">配置</button>
         <button class="tab" data-set-tab="net" data-i18n="网络">网络</button>
         <button class="tab" data-set-tab="market" data-i18n="SKILL 市场">SKILL 市场</button>
+        <button class="tab" data-set-tab="about" data-i18n="关于">关于</button>
       </div>
       <div class="modal-body">
         <div class="set-pane" id="set-pane-appear">
@@ -332,7 +354,7 @@
         </div>
         <div class="set-row">
           <label data-i18n="遮罩变暗">遮罩变暗</label>
-          <input type="range" id="set-overlay-dim" min="0" max="80" step="5" />
+          <input type="range" id="set-overlay-dim" min="0" max="80" step="1" />
           <span class="set-val" id="set-overlay-dim-val"></span>
         </div>
         <div class="hint" style="margin-top:8px" data-i18n="调整弹窗背后空白的模糊与变暗程度，拖动即时预览。">调整弹窗背后空白的模糊与变暗程度，拖动即时预览。</div>
@@ -450,6 +472,34 @@
             大多数场景用不上它：匿名额度（每小时 60 次）对偶尔装几个 SKILL 完全够用。检索频繁撞上限流、或想提高 GitHub 检索精度时再考虑；填了额度提升到 5000 次。Token 只会发给 github.com，绝不发给 skills.sh 等第三方站点。
           </div>
         </div>
+        </div>
+
+        <div class="set-pane hidden" id="set-pane-about">
+          <div class="about-hero">
+            <img src="assets/icon-256.png" alt="" class="about-icon" />
+            <div class="about-id">
+              <div class="about-name">CC Skill</div>
+              <div class="about-sub"><span class="chip" id="about-version">…</span></div>
+            </div>
+            <div class="about-actions">
+              <button class="btn sm ghost hidden" id="btn-about-github" data-i18n="GitHub">GitHub</button>
+              <button class="btn sm ghost" id="btn-about-changelog" data-i18n="更新日志">更新日志</button>
+              <button class="btn primary" id="btn-check-update" data-i18n="检查更新">检查更新</button>
+            </div>
+          </div>
+          <div class="about-update hidden" id="about-update-box">
+            <p class="about-update-title" id="about-update-title"></p>
+          </div>
+          <div class="about-star" id="about-star">
+            <svg class="about-star-ico" viewBox="0 0 24 24" fill="#f59e0b" aria-hidden="true">
+              <path d="M12 2.6l2.9 5.9 6.5.95-4.7 4.6 1.1 6.5-5.8-3.05-5.8 3.05 1.1-6.5-4.7-4.6 6.5-.95z"/>
+            </svg>
+            <span class="about-star-text" data-i18n="如果 CC Skill 帮到了你，请在 GitHub 点个 Star，这对我们意义重大">如果 CC Skill 帮到了你，请在 GitHub 点个 Star，这对我们意义重大</span>
+            <span class="about-star-actions">
+              <button class="btn sm" id="btn-about-star" data-i18n="去点 Star">去点 Star</button>
+              <button class="btn sm" id="btn-about-star-dismiss" data-i18n-title="关闭" title="关闭" aria-label="关闭">×</button>
+            </span>
+          </div>
         </div>
       </div>
       <div class="modal-foot">
@@ -597,9 +647,13 @@
         <button class="modal-close" data-close="modal-add-agent">×</button>
       </div>
       <div class="modal-body">
+        <label class="form-label" style="margin-top:0" data-i18n="常见 Agent">常见 Agent</label>
+        <div class="agent-presets" id="agent-presets"></div>
         <label class="form-label" data-i18n="Agent 名称">Agent 名称</label>
         <input id="new-agent-name" class="input" data-i18n-ph="如 MyAgent" />
-        <p class="hint" data-i18n="技能目录默认为 ~/.<名称>/skills，首次安装时自动创建；也可稍后在详情中添加目录。">技能目录默认为 ~/.<名称>/skills，首次安装时自动创建；也可稍后在详情中添加目录。</p>
+        <label class="form-label" data-i18n="SKILL 目录">SKILL 目录</label>
+        <input id="new-agent-dir" class="input" placeholder="~/.myagent/skills" />
+        <p class="hint" data-i18n="目录可自定义（支持 ~ 形式），首次安装 SKILL 时自动创建；留空则稍后在详情中添加。">目录可自定义（支持 ~ 形式），首次安装 SKILL 时自动创建；留空则稍后在详情中添加。</p>
       </div>
       <div class="modal-foot">
         <button class="btn" data-close="modal-add-agent" data-i18n="取消">取消</button>
@@ -659,6 +713,7 @@
   <!-- 启动兜底：app.js 之前引入。若界面 6 秒内没起来（语法错误 / 依赖挂掉等
        连 try/catch 都进不去的情况），至少给用户一个「重新加载」的按钮 -->
   <script src="boot-guard.js"></script>
+  <script src="agent-logos.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

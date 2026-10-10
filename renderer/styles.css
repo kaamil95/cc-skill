@@ -447,6 +447,20 @@ body[data-platform='darwin'] #topbar { padding-left: 84px; }
 .nav-icon { width: 16px; display: flex; justify-content: center; color: var(--text-2); }
 .nav-item.active .nav-icon { color: var(--accent); }
 .nav-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; margin: 0 4px; box-shadow: inset 0 0 0 0.5px var(--dot-ring); }
+/* 侧栏的品牌 Logo：吃 nav-dot 的占位与边距，去掉圆点底色，略放大与行高匹配 */
+.nav-dot.agent-logo { background: none; border-radius: 0; box-shadow: none; width: 14px; height: 14px; margin: 0 3px; }
+
+/* 添加自定义 Agent：常见 Agent 预设快捷条 */
+.agent-presets { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 4px; }
+.agent-preset {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 10px; font-size: 12.5px;
+  border: 1px solid var(--hairline-strong); border-radius: 999px;
+  background: var(--panel); color: var(--text); cursor: pointer;
+}
+.agent-preset:hover { border-color: var(--accent); color: var(--accent); }
+.agent-preset.disabled { opacity: 0.45; cursor: not-allowed; }
+.agent-preset .dot.agent-logo { width: 13px; height: 13px; }
 .nav-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .nav-count { font-size: 12px; color: var(--text-3); font-variant-numeric: tabular-nums; }
 .nav-item.active .nav-count { color: var(--text-2); }
@@ -568,6 +582,15 @@ body[data-platform='darwin'] #topbar { padding-left: 84px; }
   white-space: nowrap;
 }
 .chip .dot { width: 7px; height: 7px; border-radius: 50%; }
+/* 品牌 Logo 标记：沿用 .dot 的布局位置，去掉圆点底色，图形略放大才看得清 */
+.dot.agent-logo { background: none; border-radius: 0; display: inline-flex; align-items: center; justify-content: center; }
+.dot.agent-logo img { width: 100%; height: 100%; object-fit: contain; display: block; }
+[data-theme='dark'] .dot.agent-logo img.img-mono { filter: brightness(0) invert(1); }
+.chip .dot.agent-logo { width: 11px; height: 11px; }
+.dash-row .dot.agent-logo { width: 11px; height: 11px; }
+.picker-opt .dot.agent-logo { width: 11px; height: 11px; }
+.opt-dots .dot.agent-logo { width: 9px; height: 9px; }
+.agent-block-head .dot.agent-logo { width: 13px; height: 13px; }
 .chip.proj-chip { background: var(--purple-soft); color: var(--purple-text); font-weight: 500; }
 /* 只通过链接出现的 Agent：accent 虚线芯片 + 🔗 顶掉彩色圆点（圆点在这里会谎称文件就在那儿） */
 .chip.link-chip {
@@ -825,6 +848,103 @@ select.input {
   transition: border-color 0.12s, box-shadow 0.12s;
 }
 #detail-editor:focus { border-color: var(--accent); box-shadow: 0 0 0 3.5px var(--accent-soft); }
+
+/* 文件编辑器：高亮层（pre）垫在透明 textarea 下面做 JSON 着色。
+   两层的字体度量、padding、换行规则必须完全一致，否则行会错位 */
+.editor-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 340px;
+}
+#file-editor-hl,
+#file-editor {
+  margin: 0;
+  min-height: 340px;
+  box-sizing: border-box;
+  width: 100%;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.7;
+  padding: 14px;
+  border: 1px solid var(--hairline-strong);
+  border-radius: 10px;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  tab-size: 2;
+}
+#file-editor-hl {
+  position: absolute;
+  inset: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--editor-bg);
+  color: var(--text);
+  pointer-events: none;
+}
+#file-editor {
+  position: relative;
+  display: block;
+  height: 100%;
+  overflow: auto;
+  background: transparent;
+  color: transparent;
+  caret-color: var(--text);
+  resize: none;
+  outline: none;
+}
+#file-editor:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3.5px var(--accent-soft);
+}
+/* 非 JSON 文件没有高亮层，文字回到实色（默认透明是给 JSON 着色让位） */
+#file-editor.plain {
+  color: var(--text);
+}
+.tok-key { color: var(--accent); }
+.tok-str { color: var(--green); }
+.tok-num { color: var(--orange); }
+.tok-lit { color: var(--red); }
+.tok-pun { color: var(--text-3); }
+.json-status {
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.json-status.bad { color: var(--red); }
+
+/* ---------------- 设置 → 关于（横排 hero，启动静默查更新） ---------------- */
+.about-hero {
+  display: flex; align-items: center; gap: 14px;
+  padding: 18px 20px;
+  border: 1px solid var(--hairline);
+  border-radius: 14px;
+  background:
+    radial-gradient(130% 180% at 0% 0%, var(--accent-soft), transparent 58%),
+    var(--panel);
+}
+.about-icon { width: 52px; height: 52px; border-radius: 12px; flex: none; box-shadow: 0 3px 14px var(--accent-glow); }
+.about-id { flex: 1; min-width: 0; }
+.about-name { font-weight: 700; font-size: 16px; letter-spacing: 0.2px; }
+.about-sub { margin-top: 4px; }
+.about-actions { display: flex; align-items: center; gap: 8px; flex: none; }
+.about-update {
+  margin-top: 10px; padding: 10px 14px;
+  border: 1px solid var(--accent-tint);
+  border-radius: 10px;
+  background: var(--accent-soft);
+}
+.about-update-title { margin: 0; font-size: 13px; font-weight: 600; color: var(--accent); }
+.about-star {
+  display: flex; align-items: center; gap: 12px;
+  margin-top: 12px; padding: 12px 16px;
+  border: 1px solid color-mix(in srgb, #f59e0b 32%, transparent);
+  border-radius: 12px;
+  background: linear-gradient(135deg, color-mix(in srgb, #f59e0b 13%, var(--panel)), color-mix(in srgb, #f59e0b 5%, var(--panel)));
+}
+.about-star-ico { width: 20px; height: 20px; flex: none; }
+.about-star-text { flex: 1; min-width: 0; font-size: 13px; }
+.about-star-actions { display: flex; align-items: center; gap: 4px; flex: none; }
+#btn-about-star-dismiss { border: none; background: none; font-size: 15px; color: var(--text-3); padding: 4px 8px; }
 .edit-actions { margin-top: 10px; display: flex; justify-content: flex-end; }
 
 .file-list { list-style: none; }
@@ -832,6 +952,12 @@ select.input {
 .file-list li:last-child { border-bottom: none; }
 .file-list svg { color: var(--text-3); }
 .file-list .fsize { margin-left: auto; color: var(--text-3); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+/* 文件页签的行可点：目录进入、文件打开编辑器 */
+.file-list li[data-name],
+.file-list li.file-up { cursor: pointer; }
+.file-list li[data-name]:hover,
+.file-list li.file-up:hover { background: var(--field-hover); }
+.file-list li.file-up { color: var(--text-3); }
 
 /* ---------------- 导入 / 设置 / 合并 ---------------- */
 .import-pick { display: flex; gap: 10px; margin-bottom: 6px; }

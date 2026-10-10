@@ -304,6 +304,7 @@ async function scan() {
   state.projects = r.projects || [];
   state.webdav = r.webdav || {};
   state.missing = r.missingDirs || [];
+  state.projectSubs = r.projectSubs || [];
   state.view = buildDisplayList();
   i18n.apply(document);
   renderSidebar();
@@ -340,7 +341,7 @@ function renderSidebar() {
       .map((a) => {
         const n = state.view.filter((s) => !s.project && s.allAgentIds.includes(a.id)).length;
         return `<div class="nav-item ${state.filter === a.id ? 'active' : ''}" data-filter="${esc(a.id)}">
-        <span class="nav-dot" style="background:${esc(a.color)}"></span>
+        ${agentMark(a, 'nav-dot')}
         <span class="nav-name">${esc(a.name)}</span>
         <span class="nav-count">${n}</span>
       </div>`;
@@ -413,8 +414,35 @@ async function addProjectFlow() {
 }
 
 // ＋ 添加 Agent：命名后创建（目录为空，首次安装时自动生成默认目录）
+// 常见 Agent 预设：点选自动填入名称与默认目录，也支持完全自定义。
+// 只列有把握的官方 skills 目录约定；新条目记得与 agent-logos.js 的图标注册表对齐
+const KNOWN_AGENT_PRESETS = [
+  { name: 'Claude Code', dir: '~/.claude/skills' },
+  { name: 'Codex', dir: '~/.codex/skills' },
+  { name: 'OpenCode', dir: '~/.opencode/skills' },
+  { name: 'OpenClaw', dir: '~/.openclaw/skills' },
+  { name: 'ZCode', dir: '~/.zcode/skills' },
+  { name: 'Qoder', dir: '~/.qoder/skills' },
+];
+
 function openAddAgentModal() {
   $('#new-agent-name').value = '';
+  $('#new-agent-dir').value = '';
+  const box = $('#agent-presets');
+  box.innerHTML = KNOWN_AGENT_PRESETS.map((p) => {
+    // 已添加过的（同名或同目录）置灰禁用，避免重复登记
+    const exists = state.agents.some((a) => a.name === p.name || (a.dirs || []).some((d) => normPath(expand(d)) === normPath(expand(p.dir))));
+    return `<button type="button" class="agent-preset${exists ? ' disabled' : ''}" data-name="${esc(p.name)}" data-dir="${esc(p.dir)}"${
+      exists ? ' disabled title="' + esc(t('已添加过该 Agent')) + '"' : ''
+    }>${agentMark(p)}<span>${esc(p.name)}</span></button>`;
+  }).join('');
+  $$('#agent-presets .agent-preset:not(.disabled)').forEach((el) =>
+    el.addEventListener('click', () => {
+      $('#new-agent-name').value = el.dataset.name;
+      $('#new-agent-dir').value = el.dataset.dir;
+      $('#btn-add-agent-go').focus();
+    })
+  );
   openModal('modal-add-agent');
   setTimeout(() => $('#new-agent-name').focus(), 50);
 }
@@ -423,6 +451,11 @@ $('#btn-add-agent-go').addEventListener('click', async () => {
   const name = $('#new-agent-name').value.trim();
   if (!name) return toast(t('请填写 Agent 名称'), 'err');
   if (state.agents.some((a) => a.name === name)) return toast(t('已存在同名 Agent'), 'err');
+  const dirVal = $('#new-agent-dir').value.trim();
+  if (dirVal) {
+    const dup = state.agents.some((a) => (a.dirs || []).some((d) => normPath(expand(d)) === normPath(expand(dirVal))));
+    if (dup) return toast(t('该目录已被其他 Agent 使用'), 'err');
+  }
   const slug =
     name
       .toLowerCase()
@@ -431,7 +464,7 @@ $('#btn-add-agent-go').addEventListener('click', async () => {
   let id = slug;
   while (state.agents.some((a) => a.id === id)) id += '-2';
   const colors = ['#e07a4f', '#19b39a', '#f0a35c', '#4f8ef7', '#8b5cf6', '#e2556e', '#38bdf8'];
-  const agents = state.agents.concat([{ id, name, color: colors[state.agents.length % colors.length], dirs: [] }]);
+  const agents = state.agents.concat([{ id, name, color: colors[state.agents.length % colors.length], dirs: dirVal ? [dirVal] : [] }]);
   const r = await api.invoke('config:set', { agents, projects: state.projects });
   if (!r.ok) return toast(t('创建失败：'), 'err');
   toast(tf('已添加 {name} ✓', { name }), 'ok');
@@ -467,7 +500,7 @@ const { linkOnlyAgentIds, linkRole, viewedEntry } = window.skillView;
 function agentChipHTML(a, isLink) {
   return isLink
     ? `<span class="chip link-chip" title="${t('通过链接共用，文件不在这里')}">🔗 ${esc(a.name)}</span>`
-    : `<span class="chip"><span class="dot" style="background:${esc(a.color)}"></span>${esc(a.name)}</span>`;
+    : `<span class="chip">${agentMark(a)}${esc(a.name)}</span>`;
 }
 
 function cardHTML(s) {
@@ -698,7 +731,7 @@ function renderDashboard() {
       const n = global.filter((s) => s.allAgentIds.includes(a.id)).length;
       const miss = missingByAgent.get(a.id) || 0;
       return `<div class="dash-row">
-        <span class="dot" style="background:${esc(a.color)}"></span>
+        ${agentMark(a)}
         <span class="dash-name">${esc(a.name)}</span>
         <span class="dash-sub">${miss ? `<span class="dash-warn dash-miss" data-agent="${esc(a.id)}" title="${t('点击查看缺失的目录')}">⚠ ${tf('{n} 个目录缺失', { n: miss })} ›</span>` : tf('{n} 个目录', { n: (a.dirs || []).length })}</span>
         <span class="dash-n">${n}</span>
@@ -961,7 +994,9 @@ function openDetail(s, entry) {
   $('#detail-meta').innerHTML = chips + `<span class="path" title="${esc(seen.absPath)}">${esc(seen.absPath)}</span>`;
   // 页脚那个按钮就是唯一的「装到别处」入口：安装弹窗里本来就能选复制还是链接，
   // 页签里再放一个默认选链接的按钮，只是同一个弹窗的第二个门
-  $('#btn-detail-copy').textContent = s.project ? t('提取到全局…') : t('安装到其他 Agent…');
+  // 项目 SKILL 与全局一致都叫「安装到其他 Agent…」：「迁移到…」已经管搬家，
+  // 再叫「提取到全局」会让人以为是搬家的另一种说法
+  $('#btn-detail-copy').textContent = t('安装到其他 Agent…');
   // 迁移只对本体有意义：链接条目 / 失效链接没有可搬的东西，禁用并说明原因
   const movable = !seen.linked && !seen.dangling;
   const btnMove = $('#btn-detail-move');
@@ -988,6 +1023,13 @@ function openDetail(s, entry) {
   $$('#modal-detail .tab').forEach((el) => el.classList.toggle('active', el.dataset.tab === 'preview'));
   $('#detail-editor').value = t('加载中…');
   $('#detail-files').innerHTML = '<li>' + t('加载中…') + '</li>';
+  // 文件页签的浏览状态：root=列表起点（也是「返回上一级」的终点），dir=当前所在目录
+  state.filesNav = {
+    root: seen.type === 'folder' ? seen.absPath : seen.parentDir,
+    dir: seen.type === 'folder' ? seen.absPath : seen.parentDir,
+    isFile: seen.type !== 'folder',
+  };
+  state.editingFile = null;
   openModal('modal-detail');
 
   api.invoke('skill:read', { path: seen.skillMdPath }).then((r) => {
@@ -998,18 +1040,188 @@ function openDetail(s, entry) {
       $('#detail-md').textContent = t('读取失败：') + (r.error || '');
     }
   });
-  api.invoke('skill:files', { dir: seen.type === 'folder' ? seen.absPath : seen.parentDir, type: seen.type }).then((r) => {
-    if (!r.ok || !r.files.length) {
-      $('#detail-files').innerHTML =
-        `<li style="color:var(--text-3)">${seen.type === 'file' ? t('单文件 SKILL（') + esc(seen.folder) + '.md）' : t('空目录')}</li>`;
-      return;
-    }
-    $('#detail-files').innerHTML = r.files
-      .map((f) => `<li>${f.isDir ? FOLDER_SVG : FILE_SVG}<span>${esc(f.name)}</span><span class="fsize">${f.isDir ? t('目录') : fmtSize(f.size)}</span></li>`)
-      .join('');
-  });
+  renderSkillFiles();
   renderDetailLinks(s);
 }
+
+// 「文件」页签：列出当前浏览目录；目录可进入，文件点开就地编辑（方便改 projects.json / team.json 之类的配置）
+function renderSkillFiles() {
+  const nav = state.filesNav;
+  const list = $('#detail-files');
+  if (!nav || nav.isFile) {
+    const seen = state.detailEntry || state.detail;
+    list.innerHTML = `<li style="color:var(--text-3)">${t('单文件 SKILL（')}${esc(seen ? seen.folder : '')}.md）</li>`;
+    return;
+  }
+  api.invoke('skill:files', { dir: nav.dir, type: 'folder' }).then((r) => {
+    const up =
+      nav.dir === nav.root ? '' : `<li class="file-up" data-action="up">${FOLDER_SVG}<span>..</span><span class="fsize">${t('返回上一级')}</span></li>`;
+    if (!r.ok || !r.files.length) {
+      list.innerHTML = up + `<li style="color:var(--text-3)">${t('空目录')}</li>`;
+      return;
+    }
+    list.innerHTML =
+      up +
+      r.files
+        .map(
+          (f) =>
+            `<li data-name="${esc(f.name)}" data-isdir="${f.isDir ? '1' : '0'}" title="${esc(nav.dir.replace(/[\\/]+$/, '') + '/' + f.name)}">${
+              f.isDir ? FOLDER_SVG : FILE_SVG
+            }<span>${esc(f.name)}</span><span class="fsize">${f.isDir ? t('目录') : fmtSize(f.size)}</span></li>`
+        )
+        .join('');
+  });
+}
+
+$('#detail-files').addEventListener('click', (e) => {
+  const row = e.target.closest('li');
+  const nav = state.filesNav;
+  if (!row || !nav) return;
+  const join = (dir, name) => dir.replace(/[\\/]+$/, '') + '/' + name;
+  if (row.dataset.action === 'up') {
+    // 逐段回退并以列表起点为下限：路径截到盘符根时也不越界跑出 skill 目录
+    const parent = nav.dir.replace(/[\\/][^\\/]+[\\/]?$/, '');
+    nav.dir = parent && parent.length >= nav.root.length ? parent : nav.root;
+    renderSkillFiles();
+    return;
+  }
+  if (!row.dataset.name) return;
+  const full = join(nav.dir, row.dataset.name);
+  if (row.dataset.isdir === '1') {
+    nav.dir = full;
+    renderSkillFiles();
+    return;
+  }
+  openFileEditor(full, row.dataset.name);
+});
+
+// 控制字符（\t \n \r 除外）出现在内容里基本就是二进制文件
+function looksBinary(text) {
+  for (let i = 0; i < text.length; i++) {
+    const n = text.charCodeAt(i);
+    if (n < 9 || (n > 13 && n < 32)) return true;
+  }
+  return false;
+}
+
+async function openFileEditor(fullPath, name) {
+  const r = await api.invoke('skill:read', { path: fullPath });
+  if (!r.ok) {
+    toast(t('读取失败：') + (r.error || ''), 'err');
+    return;
+  }
+  // 二进制文件按 utf8 读出来只会是乱码，保存还会把它毁掉——识别出来直接拒绝
+  if (looksBinary(String(r.content))) {
+    toast(t('该文件不是文本文件，无法编辑'), 'err');
+    return;
+  }
+  state.editingFile = fullPath;
+  state.editingJson = /\.json$/i.test(name);
+  $('#file-edit-title').textContent = name;
+  $('#file-editor').value = r.content;
+  refreshJsonEditor();
+  openModal('modal-file-edit');
+}
+
+// JSON 着色：键 / 字符串 / 数字 / 字面量 / 标点分色。单次正则扫过，非 JSON 文本原样透传
+function highlightJson(text) {
+  const re = /("(?:\\.|[^"\\])*")(\s*:)?|(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)|\b(true|false|null)\b|([{}[\],:])/g;
+  let out = '';
+  let last = 0;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    out += esc(text.slice(last, m.index));
+    if (m[1] !== undefined) {
+      out += m[2] !== undefined ? `<span class="tok-key">${esc(m[1])}</span>${esc(m[2])}` : `<span class="tok-str">${esc(m[1])}</span>`;
+    } else if (m[3] !== undefined) {
+      out += `<span class="tok-num">${esc(m[3])}</span>`;
+    } else if (m[4] !== undefined) {
+      out += `<span class="tok-lit">${esc(m[4])}</span>`;
+    } else {
+      out += `<span class="tok-pun">${esc(m[5])}</span>`;
+    }
+    last = m.index + m[0].length;
+  }
+  out += esc(text.slice(last));
+  return out;
+}
+
+// 把 V8 的英文 JSON 解析报错翻成中文，尽量带上行列号；认不出的错误退回通用说法
+function jsonErrorZh(src, err) {
+  const msg = String((err && err.message) || err);
+  let loc = '';
+  const pm = msg.match(/at position (\d+)/i);
+  if (pm) {
+    const pos = Math.min(parseInt(pm[1], 10), src.length);
+    const before = src.slice(0, pos);
+    const line = (before.match(/\n/g) || []).length + 1;
+    const col = pos - (before.lastIndexOf('\n') + 1) + 1;
+    loc = tf('（第 {l} 行第 {c} 列附近）', { l: line, c: col });
+  }
+  const token = msg.match(/Unexpected token '(.+?)'/i) || msg.match(/Unexpected token (\S+?) in JSON/i);
+  if (token) return tf('出现意外的符号 {tok}{loc}', { tok: token[1], loc });
+  const rules = [
+    [/Unexpected end of JSON input/i, 'JSON 内容不完整：括号或引号可能没有闭合{loc}'],
+    [/Expected property name/i, '缺少属性名（属性名要用双引号包裹）{loc}'],
+    [/Expected double-quoted property name/i, '属性名必须用双引号包裹{loc}'],
+    [/Expected ':' after property name/i, '属性名后面缺少冒号{loc}'],
+    [/Expected ',' or '}'/i, '属性之间可能缺少逗号，或缺少结束的 }{loc}'],
+    [/Expected ',' or ']'/i, '数组元素之间可能缺少逗号，或缺少结束的 ]{loc}'],
+    [/Unterminated string/i, '字符串没有闭合（缺少右引号）{loc}'],
+    [/Bad control character/i, '字符串里含有非法控制字符{loc}'],
+    [/Bad escaped character/i, '含有非法的转义字符{loc}'],
+    [/Unexpected non-whitespace character after JSON/i, 'JSON 结束后有多余内容{loc}'],
+  ];
+  for (const [re, tpl] of rules) {
+    if (re.test(msg)) return tf(tpl, { loc });
+  }
+  return t('JSON 语法错误') + loc;
+}
+
+// JSON 文件：高亮 + 实时语法检测。语法错误时禁用保存——坏配置落盘会让 SKILL 直接跑不起来
+function refreshJsonEditor() {
+  const text = $('#file-editor').value;
+  const status = $('#file-edit-status');
+  if (!state.editingJson) {
+    // 非 JSON 没有高亮层垫底，文字得回到实色，否则 textarea 里的内容会隐形
+    $('#file-editor-hl').innerHTML = '';
+    $('#file-editor').classList.add('plain');
+    status.className = 'json-status hidden';
+    $('#btn-save-file').disabled = false;
+    return;
+  }
+  $('#file-editor').classList.remove('plain');
+  $('#file-editor-hl').innerHTML = highlightJson(text) + '\n';
+  try {
+    JSON.parse(text);
+    // 没消息就是好消息：正确时不占一行动静
+    status.className = 'json-status hidden';
+    status.textContent = '';
+    $('#btn-save-file').disabled = false;
+  } catch (err) {
+    status.className = 'json-status bad';
+    status.textContent = jsonErrorZh(text, err);
+    $('#btn-save-file').disabled = true;
+  }
+}
+
+$('#file-editor').addEventListener('input', refreshJsonEditor);
+// 高亮层跟着 textarea 滚动，否则一滚动文字就和颜色错位
+$('#file-editor').addEventListener('scroll', () => {
+  const ta = $('#file-editor');
+  const hl = $('#file-editor-hl');
+  hl.scrollTop = ta.scrollTop;
+  hl.scrollLeft = ta.scrollLeft;
+});
+
+$('#btn-save-file').addEventListener('click', async () => {
+  if (!state.editingFile) return;
+  const r = await api.invoke('skill:write', { path: state.editingFile, content: $('#file-editor').value });
+  if (r.ok) {
+    toast(t('已保存 ✓'), 'ok');
+    scan();
+  } else toast(t('保存失败：') + (r.error || ''), 'err');
+});
 
 function renderDetailLinks(s) {
   const box = $('#detail-links');
@@ -1039,7 +1251,7 @@ function renderDetailLinks(s) {
       <span class="dup-agents">${l.agentIds
         .map((id) => {
           const a = agentById(id);
-          return a ? `<span class="chip"><span class="dot" style="background:${esc(a.color)}"></span>${esc(a.name)}</span>` : '';
+          return a ? `<span class="chip">${agentMark(a)}${esc(a.name)}</span>` : '';
         })
         .join(' ')}</span>
       <span class="link-path" title="${esc(l.absPath)}">${esc(shortPath(l.absPath))}</span>
@@ -1242,9 +1454,16 @@ function targetGroups() {
   }
   const groups = [{ title: t('全局 · Agent 目录'), items: solo }];
   if (shared.length) groups.push({ title: t('全局 · 共享目录'), items: shared });
+  const PROJECT_SUBDIRS = ['.claude', '.agents', '.zcode', '.codex', '.qoder'];
   for (const p of state.projects) {
-    const items = ['.claude', '.agents', '.zcode', '.codex', '.qoder'].map((sub) => ({
-      value: `${p.dir.replace(/[\\/]+$/, '')}/${sub}/skills`,
+    // 只列磁盘上真实存在的约定子目录：项目没用到的 agent 目录不该当安装目标推销。
+    // 全新项目一个都没有时保底给 .claude/skills（最通用约定），否则没处装第一个 SKILL
+    const existing = new Set(((state.projectSubs || []).find((x) => x.projectId === p.id) || {}).subs || []);
+    const subs = PROJECT_SUBDIRS.filter((s) => existing.has(s));
+    const use = subs.length ? subs : ['.claude'];
+    const base = p.dir.replace(/[\\/]+$/, '');
+    const items = use.map((sub) => ({
+      value: `${base}/${sub}/skills`,
       agent: p.name,
       color: '',
       dir: `${sub}/skills`,
@@ -1272,14 +1491,14 @@ function pickerFaceHTML(o, el) {
   if (o.shared) {
     const names = o.agents.map((a) => a.name).join(' · ');
     return `<span class="picker-face">
-      <span class="opt-dots">${o.agents.map((a) => `<span class="dot" style="background:${esc(a.color)}"></span>`).join('')}</span>
+      <span class="opt-dots">${o.agents.map((a) => `${agentMark(a)}`).join('')}</span>
       <span class="picker-agent">${esc(names)}</span>
       <span class="picker-dir" title="${esc(o.dir)}">${esc(shortPath(o.dir))}</span>
       ${dupBadge(el, o)}
     </span>`;
   }
   return `<span class="picker-face">
-      ${o.color ? `<span class="dot" style="background:${esc(o.color)}"></span>` : ''}
+      ${o.color || o.agent ? agentMark({ name: o.agent, color: o.color, dirs: [o.dir] }) : ''}
       <span class="picker-agent">${esc(o.agent)}</span>
       <span class="picker-dir" title="${esc(o.dir)}">${esc(shortPath(o.dir))}</span>
       ${dupBadge(el, o)}
@@ -1361,7 +1580,7 @@ function pickerOptHtml(el) {
       const names = o.agents.map((a) => a.name).join(' · ');
       return `<button type="button" class="picker-opt shared" role="option" data-value="${esc(o.value)}"${o.disabled ? ' disabled' : ''}
           aria-selected="${o.value === pickerValue(el)}" title="${esc(names)}">
-          <span class="opt-dots">${o.agents.map((a) => `<span class="dot" style="background:${esc(a.color)}"></span>`).join('')}</span>
+          <span class="opt-dots">${o.agents.map((a) => `${agentMark(a)}`).join('')}</span>
           <span class="picker-agent">${esc(names)}</span>
           <span class="picker-dir" title="${esc(o.dir)}">${esc(shortPath(o.dir))}</span>
           ${dupBadge(el, o)}
@@ -1369,7 +1588,7 @@ function pickerOptHtml(el) {
     }
     return `<button type="button" class="picker-opt" role="option" data-value="${esc(o.value)}"${o.disabled ? ' disabled' : ''}
           aria-selected="${o.value === pickerValue(el)}">
-          ${o.color ? `<span class="dot" style="background:${esc(o.color)}"></span>` : ''}
+          ${o.color || o.agent ? agentMark({ name: o.agent, color: o.color, dirs: [o.dir] }) : ''}
           <span class="picker-agent">${esc(o.agent)}</span>
           <span class="picker-dir" title="${esc(o.dir)}">${esc(shortPath(o.dir))}</span>
           ${o.tag ? `<span class="picker-tag">${esc(o.tag)}</span>` : ''}
@@ -1621,7 +1840,7 @@ async function openDupsModal() {
           <span class="dup-agents">${c.agentIds
             .map((id) => {
               const a = agentById(id);
-              return a ? `<span class="chip"><span class="dot" style="background:${esc(a.color)}"></span>${esc(a.name)}</span>` : '';
+              return a ? `<span class="chip">${agentMark(a)}${esc(a.name)}</span>` : '';
             })
             .join(' ')}</span>
           <span class="dup-files">${c.fileCount} ${t('个文件')}</span>
@@ -2498,8 +2717,8 @@ function applyOverlay(ui) {
 function fillOverlayInputs(ui) {
   const blur = Number(ui && ui.overlayBlur);
   const dim = Number(ui && ui.overlayDim);
-  const b = Number.isFinite(blur) ? blur : 24;
-  const d = Number.isFinite(dim) ? dim : 0.3;
+  const b = Number.isFinite(blur) ? blur : 1;
+  const d = Number.isFinite(dim) ? dim : 0.26;
   $('#set-overlay-blur').value = String(b);
   $('#set-overlay-dim').value = String(Math.round(d * 100));
   $('#set-overlay-blur-val').textContent = b + 'px';
@@ -2582,7 +2801,7 @@ $('#set-accent-custom').addEventListener('input', (e) => previewTheme(readThemeI
 
 // 设置面板按类别分页：配置项越来越多，一屏一类才找得到。
 // 页签在 modal-body 之外，内容滚动时分类栏不跟着走（见 index.html）
-const SET_TABS = ['appear', 'sync', 'machine', 'config', 'net', 'market'];
+const SET_TABS = ['appear', 'sync', 'machine', 'config', 'net', 'market', 'about'];
 
 function showSettingsTab(key) {
   if (!SET_TABS.includes(key)) key = SET_TABS[0];
@@ -2591,6 +2810,7 @@ function showSettingsTab(key) {
   SET_TABS.forEach((k) => $('#set-pane-' + k).classList.toggle('hidden', k !== key));
   // 换一类就从头看：否则从「外观」滚到底再切「云同步」，会停在那一类的半截处
   $('#modal-settings .modal-body').scrollTop = 0;
+  if (key === 'about') renderAbout();
 }
 
 $('#set-tabs').addEventListener('click', (e) => {
@@ -2634,6 +2854,111 @@ function closeSettings(revertPreview) {
 });
 $('#set-close').addEventListener('click', () => closeSettings(true));
 $('#set-cancel').addEventListener('click', () => closeSettings(true));
+// ------------------------------ 在线更新（设置 → 关于） -----------------------
+// 版式照搬 CC Switch 的 AboutSection：单按钮状态机（检查更新 → 更新到 vX）、
+// 有更新才出提示行、无更新/失败走 toast；邀 Star 条关闭状态记 localStorage（纯界面偏好）
+const STAR_DISMISS_KEY = 'cc-skill:about:starDismissed';
+const starDismissed = () => {
+  try {
+    return localStorage.getItem(STAR_DISMISS_KEY) === '1';
+  } catch (_) {
+    return false;
+  }
+};
+
+function renderAboutStar() {
+  const dismissed = starDismissed();
+  $('#about-star').classList.toggle('hidden', dismissed);
+  // 条在时 GitHub 入口由 Star 按钮承担；条关掉后链接行补回 GitHub 按钮
+  $('#btn-about-github').classList.toggle('hidden', !dismissed);
+}
+
+function renderAbout() {
+  $('#about-version').textContent = 'v' + (state.version || '…');
+  renderAboutStar();
+  syncUpdateButton();
+}
+
+function syncUpdateButton() {
+  const btn = $('#btn-check-update');
+  const info = state.updateInfo;
+  state.hasUpdate = !!(info && info.updateAvailable);
+  $('#about-update-box').classList.toggle('hidden', !state.hasUpdate);
+  if (state.hasUpdate) {
+    $('#about-update-title').textContent = tf('检测到新版本：v{v}', { v: info.latestVersion });
+    btn.classList.add('primary');
+    btn.textContent = tf('更新到 v{v}', { v: info.latestVersion });
+    btn.disabled = !info.asset;
+    if (!info.asset) btn.title = t('该版本没有适用于本平台的安装包');
+  } else {
+    btn.classList.remove('primary');
+    btn.textContent = t('检查更新');
+    btn.disabled = false;
+    btn.title = '';
+  }
+}
+
+let aboutChecking = false;
+
+async function runUpdateCheck({ silent = false } = {}) {
+  if (aboutChecking) return;
+  aboutChecking = true;
+  renderAbout();
+  const btn = $('#btn-check-update');
+  btn.disabled = true;
+  btn.classList.remove('primary');
+  btn.textContent = t('检查中…');
+  const r = await api.invoke('update:check');
+  aboutChecking = false;
+  btn.disabled = false;
+  if (!r || !r.ok) {
+    syncUpdateButton();
+    if (!silent) toast(t('检查更新失败：') + ((r && r.error) || ''), 'err');
+    return;
+  }
+  state.updateInfo = r.updateAvailable ? r : null;
+  syncUpdateButton();
+  // 静默（启动自动检查）不弹「已是最新」，只在发现新版本时让按钮变主色
+  if (!r.updateAvailable && !silent) toast(tf('已是最新版本（v{v}）', { v: r.currentVersion || state.version }), 'ok');
+}
+
+async function doUpdate() {
+  const info = state.updateInfo;
+  if (!info || !info.asset) return;
+  const btn = $('#btn-check-update');
+  btn.disabled = true;
+  btn.textContent = t('下载中…');
+  const r = await api.invoke('update:download', { url: info.asset.url, version: info.latestVersion });
+  btn.disabled = false;
+  if (!r.ok) {
+    toast(t('下载失败：') + (r.error || r.reason || ''), 'err');
+    return;
+  }
+  toast(t('下载完成，已打开安装包 —— 安装后重新启动即可'), 'ok');
+  api.invoke('shell:openPath', { path: r.path });
+}
+
+$('#btn-check-update').addEventListener('click', () => (state.hasUpdate ? doUpdate() : runUpdateCheck()));
+$('#btn-about-star').addEventListener('click', () => api.invoke('shell:openUrl', { url: 'https://github.com/kaamil95/cc-skill' }));
+$('#btn-about-star-dismiss').addEventListener('click', () => {
+  try {
+    localStorage.setItem(STAR_DISMISS_KEY, '1');
+  } catch (_) {
+    /* 存不下就只在本次会话里隐藏 */
+  }
+  renderAboutStar();
+});
+$('#btn-about-github').addEventListener('click', () => api.invoke('shell:openUrl', { url: 'https://github.com/kaamil95/cc-skill' }));
+$('#btn-about-changelog').addEventListener('click', () => {
+  const info = state.updateInfo;
+  const url =
+    info && info.latestVersion ? `https://github.com/kaamil95/cc-skill/releases/tag/v${info.latestVersion}` : 'https://github.com/kaamil95/cc-skill/releases';
+  api.invoke('shell:openUrl', { url });
+});
+
+// 启动后静默查一次新版本（对齐 cc-switch：查一次存状态，关于页只负责展示，不随页签开关反复请求）
+setTimeout(() => runUpdateCheck({ silent: true }).catch(() => {}), 1500);
+
 $('#modal-settings').addEventListener('mousedown', (e) => {
   if (e.target === e.currentTarget) closeSettings(true);
 });
@@ -3705,6 +4030,7 @@ api.onSyncAuto?.((r) => {
     state.ui = p.ui || { lang: 'auto' };
     state.proxy = p.proxy || state.proxy;
     state.marketCfg = p.market || state.marketCfg;
+    state.version = p.version || state.version;
     state.machine = { id: p.machineId || '', name: p.machineName || '', hostname: p.hostname || '' };
     // 让样式表知道平台：macOS 用系统红绿灯，需要隐藏自绘窗口按钮并给左上角留位
     document.body.dataset.platform = p.platform || '';

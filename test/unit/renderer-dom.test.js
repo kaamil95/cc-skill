@@ -31,10 +31,37 @@ test('引用预览弹窗（点 SKILL.md 内链接后打开的）元素齐全', (
   }
 });
 
+test('文件编辑弹窗（详情弹窗「文件」页签点文件后打开的）元素齐全', () => {
+  const ids = idsIn(html);
+  for (const id of ['modal-file-edit', 'file-edit-title', 'file-editor', 'btn-save-file', 'file-editor-hl', 'file-edit-status']) {
+    assert.ok(ids.has(id), 'index.html 缺少 #' + id);
+  }
+});
+
+test('设置「关于」页签（在线更新）元素齐全', () => {
+  const ids = idsIn(html);
+  for (const id of [
+    'set-pane-about',
+    'about-version',
+    'btn-check-update',
+    'about-update-box',
+    'about-update-title',
+    'btn-about-github',
+    'btn-about-changelog',
+    'about-star',
+    'btn-about-star',
+    'btn-about-star-dismiss',
+  ]) {
+    assert.ok(ids.has(id), 'index.html 缺少 #' + id);
+  }
+});
+
 test('启动兜底脚本在 app.js 之前加载', () => {
   const bootAt = html.indexOf('src="boot-guard.js"');
+  const logosAt = html.indexOf('src="agent-logos.js"');
   const appAt = html.indexOf('src="app.js"');
   assert.ok(bootAt > 0 && appAt > 0 && bootAt < appAt, 'boot-guard.js 必须先于 app.js 引入');
+  assert.ok(logosAt > 0 && logosAt < appAt, 'agent-logos.js 必须先于 app.js 引入（app.js 渲染时就要用 agentMark）');
 });
 
 // ------------------------------ 主题契约 ------------------------------------
@@ -126,6 +153,7 @@ test('主题块之外不许出现字面颜色（深色下漏一个写死的 #fff
     /rgba\(15, 15, 18,/, // 弹窗遮罩
     /conic-gradient/, // 自定义取色器的彩虹环
     /mask-image/, // 卡片芯片行的淡出遮罩：只用 alpha 通道，与主题无关
+    /f59e0b/, // 关于页邀 Star 条的琥珀色：固定品牌色，与主题无关
   ];
   const offenders = withoutThemes
     .split('\n')
