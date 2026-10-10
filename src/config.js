@@ -145,7 +145,7 @@ function renameMachine(machineId, name) {
 // 界面偏好：语言 + 主题 + 强调色 + 弹窗遮罩的毛玻璃强度。越界 / 缺失一律回落到默认值，
 // 免得手改 config.json 写进离谱的数字后界面直接看不见。
 const OVERLAY_LIMITS = { blur: [0, 40], dim: [0, 0.8] };
-const OVERLAY_DEFAULTS = { blur: 24, dim: 0.3 };
+const OVERLAY_DEFAULTS = { blur: 1, dim: 0.26 };
 
 // 主题清单与各自的窗口底色。底色要在这里有一份，因为窗口是在渲染层之前创建的，
 // 主进程得先铺对底色，否则切到深色主题后启动/重载会闪一下白。
