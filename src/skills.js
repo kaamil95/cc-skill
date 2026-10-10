@@ -225,8 +225,12 @@ function scanAll() {
     }
   }
   // 项目级 SKILL：<project>/.claude|agents|zcode|codex|qoder/skills
+  // projectSubs 记录每个项目下真实存在的约定子目录——安装目标选择器只列这些，
+  // 不存在的（qoder/zcode 之类项目根本没在用的）不该作为候选噪声出现
+  const projectSubs = [];
   for (const proj of config.projects || []) {
     const root = expand(proj.dir);
+    const subs = [];
     for (const [sub, ids] of Object.entries(PROJECT_SUBDIR_AGENTS)) {
       const dir = path.join(root, sub, 'skills');
       let ents;
@@ -235,6 +239,7 @@ function scanAll() {
       } catch (_) {
         continue;
       }
+      subs.push(sub);
       for (const e of ents) {
         try {
           if (e.name.startsWith('.')) continue;
@@ -264,6 +269,7 @@ function scanAll() {
         }
       }
     }
+    if (subs.length) projectSubs.push({ projectId: proj.id, subs });
   }
   // 统计每个唯一副本被多少个链接引用
   const linkCounts = new Map();
@@ -278,7 +284,7 @@ function scanAll() {
   }
   skills.sort((a, b) => a.name.localeCompare(b.name, 'zh'));
   // 不含 webdav —— 由 IPC 层补上，避免这里反向依赖 webdav 模块
-  return { skills, agents: config.agents, projects: config.projects, ui: config.ui || { lang: 'auto' }, missingDirs };
+  return { skills, agents: config.agents, projects: config.projects, ui: config.ui || { lang: 'auto' }, missingDirs, projectSubs };
 }
 
 // Agent 没有配置目录时，给它一个默认目录并写回配置

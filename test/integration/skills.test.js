@@ -246,3 +246,29 @@ test('skill:move 拒绝以登记的技能目录为迁移源', async () => {
   assert.equal(r.ok, false);
   assert.ok(fs.existsSync(path.join(agentDir, 'alpha', 'SKILL.md')), '技能目录必须原封不动');
 });
+
+test('scan 的 projectSubs 只登记项目下真实存在的约定子目录', async () => {
+  // 只建 .claude/skills：安装目标选择器据此只列这一个，qoder/zcode 之类不出现的目录不当候选
+  const projRoot = path.join(root, 'proj-demo');
+  fs.mkdirSync(path.join(projRoot, '.claude', 'skills'), { recursive: true });
+  writeSkill(path.join(projRoot, '.claude', 'skills'), 'proj-only');
+  const cfg = app.readConfig();
+  cfg.projects = [{ id: 'proj-demo', name: 'proj-demo', dir: projRoot }];
+  await app.invoke('config:set', { projects: cfg.projects });
+
+  const r = await app.invoke('scan');
+  const entry = (r.projectSubs || []).find((x) => x.projectId === 'proj-demo');
+  assert.ok(entry, '存在的子目录应被登记');
+  assert.deepEqual(entry.subs, ['.claude'], '只登记真实存在的子目录');
+
+  const cfg2 = app.readConfig();
+  cfg2.projects = [{ id: 'proj-empty', name: 'proj-empty', dir: path.join(root, 'proj-empty') }];
+  await app.invoke('config:set', { projects: cfg2.projects });
+  const r2 = await app.invoke('scan');
+  assert.equal(
+    (r2.projectSubs || []).some((x) => x.projectId === 'proj-empty'),
+    false,
+    '一个子目录都不存在的项目不登记'
+  );
+  await app.invoke('config:set', { projects: [] });
+});
