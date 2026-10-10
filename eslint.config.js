@@ -31,12 +31,25 @@ module.exports = [
     languageOptions: {
       ecmaVersion: 2023,
       sourceType: 'script',
-      globals: { ...globals.browser, api: 'readonly', i18n: 'readonly', t: 'readonly', tf: 'readonly', theme: 'readonly' },
+      globals: {
+        ...globals.browser,
+        api: 'readonly',
+        i18n: 'readonly',
+        t: 'readonly',
+        tf: 'readonly',
+        theme: 'readonly',
+        agentMark: 'readonly',
+        agentLogoKey: 'readonly',
+        AGENT_LOGOS: 'readonly',
+      },
     },
     rules: {
       ...js.configs.recommended.rules,
       'no-empty': ['error', { allowEmptyCatch: true }],
       'no-unused-vars': ['error', { argsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' }],
+      // t / theme / agentMark 这类「全局」的定义处就在兄弟脚本里（i18n.js、agent-logos.js），
+      // 顶层声明与全局表撞车是预期的，builtinGlobals 检查在这里没有意义
+      'no-redeclare': ['error', { builtinGlobals: false }],
     },
   },
 
