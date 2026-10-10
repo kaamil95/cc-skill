@@ -65,6 +65,8 @@ function makeElectronStub({ dataDir, workDir, trashItem }) {
       // 不会往真实 %TEMP% 里丢东西，也不会误删开发者机器上的既有残留
       getPath: (k) => customPaths.get(k) || (k === 'temp' ? path.join(workDir, 'temp') : path.join(dataDir, k)),
       getLocale: () => 'zh-CN',
+      // 与真 Electron 一致：开发态版本就是 package.json 里的版本
+      getVersion: () => require('../../package.json').version,
       setPath: (k, v) => customPaths.set(k, v),
       requestSingleInstanceLock: () => true,
       whenReady: () => Promise.resolve(),

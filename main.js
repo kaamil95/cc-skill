@@ -16,25 +16,29 @@ const { startAutoBackup } = require('./src/webdav');
 
 let win = null;
 
-// 应用同级目录：便携版取 exe 所在目录，开发模式取项目根目录
-function appDir() {
-  if (process.env.PORTABLE_EXECUTABLE_DIR) return process.env.PORTABLE_EXECUTABLE_DIR;
+// 数据目录：便携版（electron-builder portable 运行时注入 PORTABLE_EXECUTABLE_DIR）跟 exe 走，
+// 整个目录拷走即迁移；NSIS 安装版 exe 在 Program Files（不可写），落系统标准位置；
+// 开发模式取项目根目录。测试隔离：CC_SKILL_DATA_DIR 可覆盖。要在 setPath('userData') 之前取值。
+const IS_PORTABLE = !!process.env.PORTABLE_EXECUTABLE_DIR;
+const exeDirPath = () => {
+  if (IS_PORTABLE) return process.env.PORTABLE_EXECUTABLE_DIR;
   if (app.isPackaged) return path.dirname(app.getPath('exe'));
   return app.getAppPath();
-}
+};
+const DATA_DIR = resolveDataDir({
+  override: process.env.CC_SKILL_DATA_DIR,
+  exeDir: exeDirPath(),
+  systemUserData: app.getPath('userData'),
+  portable: IS_PORTABLE,
+  packaged: app.isPackaged,
+});
+// 日志等写入点：便携 / 开发模式下数据目录就在 exe / 项目根同级，安装版是数据目录本身
+const appDir = () => DATA_DIR;
 
 // 主进程侧的日志：与渲染层共用同一个 cc-skill.log，格式也一致
 const logErr = (msg) => logLine(path.join(appDir(), 'cc-skill.log'), 'err', msg);
 const logInfo = (msg) => logLine(path.join(appDir(), 'cc-skill.log'), 'info', msg);
 
-// 数据目录：Windows / Linux 与 exe 同级（便携），macOS 用系统标准位置；
-// 测试隔离：CC_SKILL_DATA_DIR 可覆盖。注意要在 setPath('userData') 之前取默认值。
-const DATA_DIR = resolveDataDir({
-  override: process.env.CC_SKILL_DATA_DIR,
-  platform: process.platform,
-  exeDir: appDir(),
-  systemUserData: app.getPath('userData'),
-});
 // 首次运行时从 %APPDATA% 下的历史目录迁移 config.json（仅 Windows 有这个概念）
 try {
   const legacyRoot = process.env.APPDATA;

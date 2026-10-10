@@ -94,13 +94,29 @@ test('tempDir 可被宿主覆盖，默认回落到系统临时目录', () => {
   setTempDir(original);
 });
 
-test('resolveDataDir：显式指定最优先，macOS 用系统标准位置，其余平台用 exe 同级', () => {
-  const win = { platform: 'win32', exeDir: 'C:\\portable\\CC Skill', systemUserData: 'C:\\Users\\x\\AppData\\Roaming\\CC Skill' };
-  assert.equal(resolveDataDir(win), win.exeDir, 'Windows 保持便携语义');
-  assert.equal(resolveDataDir({ ...win, platform: 'linux' }), win.exeDir, 'Linux 同样与可执行文件同级');
-  assert.equal(resolveDataDir({ ...win, override: 'C:\\isolated' }), 'C:\\isolated', 'CC_SKILL_DATA_DIR 永远最优先');
+test('resolveDataDir：显式指定最优先；便携/开发跟 exe 走，安装版落系统标准位置', () => {
+  // 便携版：数据跟 exe 同级（整个目录拷走即迁移）
+  const winPortable = {
+    exeDir: 'C:\\portable\\CC Skill',
+    systemUserData: 'C:\\Users\\x\\AppData\\Roaming\\CC Skill',
+    portable: true,
+    packaged: true,
+  };
+  assert.equal(resolveDataDir(winPortable), winPortable.exeDir, 'Windows 便携版保持 exe 同级');
+  // 安装版（NSIS 装进 Program Files）：exe 同级不可写，落系统标准位置
+  const winInstalled = { ...winPortable, portable: false };
+  assert.equal(resolveDataDir(winInstalled), winInstalled.systemUserData, '安装版不能写 Program Files');
+  // 开发模式（未打包）：沿用项目根目录
+  assert.equal(resolveDataDir({ ...winInstalled, packaged: false }), winInstalled.exeDir, '开发模式取项目根');
+  assert.equal(resolveDataDir({ ...winInstalled, override: 'C:\\isolated' }), 'C:\\isolated', 'CC_SKILL_DATA_DIR 永远最优先');
 
-  const mac = { platform: 'darwin', exeDir: '/Applications/CC Skill.app/Contents/MacOS', systemUserData: '/Users/x/Library/Application Support/CC Skill' };
+  // macOS：.app 是只读签名包，永远系统标准位置
+  const mac = {
+    exeDir: '/Applications/CC Skill.app/Contents/MacOS',
+    systemUserData: '/Users/x/Library/Application Support/CC Skill',
+    portable: false,
+    packaged: true,
+  };
   assert.equal(resolveDataDir(mac), mac.systemUserData, 'macOS 不能写进 .app 包内');
   assert.equal(resolveDataDir({ ...mac, override: '/tmp/isolated' }), '/tmp/isolated');
 });

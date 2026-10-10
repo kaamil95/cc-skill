@@ -34,7 +34,7 @@
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "dist": "electron-builder --win portable",
+    "dist": "electron-builder --win",
     "dist:mac": "electron-builder --mac"
   },
   "build": {
@@ -57,9 +57,15 @@
     ],
     "win": {
       "target": [
-        "portable"
+        "nsis"
       ],
       "icon": "assets/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "CC Skill"
     },
     "mac": {
       "target": [

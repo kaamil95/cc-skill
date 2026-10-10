@@ -66,9 +66,13 @@ const ps = (s) => String(s).replace(/'/g, "''");
  *   所以用系统标准位置（~/Library/Application Support/<App>）
  * - Windows / Linux：保持便携语义——配置与 exe 同级，整个目录拷走即可
  */
-function resolveDataDir({ override, platform, exeDir, systemUserData }) {
+function resolveDataDir({ override, exeDir, systemUserData, portable, packaged }) {
   if (override) return override;
-  return platform === 'darwin' ? systemUserData : exeDir;
+  // 便携版（PORTABLE_EXECUTABLE_DIR 由 electron-builder 的 portable 目标在运行时注入）：
+  // 数据跟 exe 走，整个目录拷走即迁移。开发模式用项目根目录，方便随仓库查看 / 清理。
+  // NSIS 安装版 exe 在 Program Files（不可写）、macOS 的 .app 是只读签名包，都落系统标准位置
+  if (portable || !packaged) return exeDir;
+  return systemUserData;
 }
 
 // 本应用在临时目录下创建的名字：<前缀>-<毫秒时间戳>[.zip]。
