@@ -92,6 +92,28 @@ jobs:
             echo "CHANGELOG 里没有这一节，改用 GitHub 自动生成的说明"
           fi
 
+      - name: 生成更新清单 latest.json（应用内在线更新的数据源）
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          node - "$version" <<'EOF'
+          const fs = require('fs');
+          const version = process.argv[2];
+          const repo = process.env.GITHUB_REPOSITORY;
+          const files = fs.readdirSync('artifacts').filter((f) => /\.(exe|dmg)$/i.test(f));
+          if (!files.length) throw new Error('artifacts 里没有安装包');
+          const platforms = {};
+          for (const f of files) {
+            const url = `https://github.com/${repo}/releases/download/v${version}/${encodeURIComponent(f)}`;
+            if (/\.exe$/i.test(f)) platforms.win32 = url;
+            else if (/arm64\.dmg$/i.test(f)) platforms['darwin-arm64'] = url;
+            else if (/\.dmg$/i.test(f)) platforms['darwin-x64'] = url;
+          }
+          const notes = fs.existsSync('release-notes.md') ? fs.readFileSync('release-notes.md', 'utf8').trim() : '';
+          fs.writeFileSync('latest.json', JSON.stringify({ version, notes, platforms }, null, 2));
+          EOF
+          cat latest.json
+          cp latest.json artifacts/
+
       - name: 创建 Release 并上传安装包
         env:
           GH_TOKEN: ${{ github.token }}

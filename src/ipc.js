@@ -3,7 +3,7 @@
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
-const { ipcMain, dialog, shell } = require('electron');
+const { ipcMain, dialog, shell, app } = require('electron');
 const { IPC_CHANNEL_SET } = require('../ipc-channels');
 const { expand, tempDir } = require('./paths');
 const { resolveRef } = require('./nav');
@@ -44,6 +44,7 @@ const {
 } = require('./skills');
 const { unpackZip } = require('./zip');
 const webdav = require('./webdav');
+const { checkUpdate, downloadUpdate } = require('./update');
 
 function registerIpcHandlers({ getWindow, appDir, userData, applyProxy }) {
   const handle = (ch, fn) => {
@@ -235,6 +236,17 @@ function registerIpcHandlers({ getWindow, appDir, userData, applyProxy }) {
     return { ok: true };
   });
 
+  // ------------------------------ 在线更新 -------------------------------------
+  // 检测走 GitHub Releases；下载只认 GitHub 发行附件域名（见 update.js），装完后用户跑新包覆盖
+  handle('update:check', async () => {
+    try {
+      return await checkUpdate({ currentVersion: app.getVersion() });
+    } catch (err) {
+      return { ok: false, error: String((err && err.message) || err) };
+    }
+  });
+  handle('update:download', ({ url, version }) => downloadUpdate({ url, version }));
+
   handle('app:paths', () => ({
     userData,
     home: os.homedir(),
@@ -250,6 +262,8 @@ function registerIpcHandlers({ getWindow, appDir, userData, applyProxy }) {
     hostname: os.hostname(),
     // 渲染层据此调整自绘标题栏：macOS 用系统原生红绿灯，不再画一套自己的窗口按钮
     platform: process.platform,
+    // 「关于」页签显示的当前版本（与 package.json / 发版 tag 一致）
+    version: app.getVersion(),
   }));
 
   // 操作日志落盘（渲染端每条 toast 都会同步一份），便于事后排查

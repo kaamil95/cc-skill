@@ -53,6 +53,8 @@ const IPC_CHANNELS = [
   'win:maximize',
   'win:close',
   'win:setBackground',
+  'update:check',
+  'update:download',
 ];
 
 module.exports = { IPC_CHANNELS, IPC_CHANNEL_SET: new Set(IPC_CHANNELS) };
