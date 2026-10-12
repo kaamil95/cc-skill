@@ -322,6 +322,9 @@ function buildDisplayList() {
       const canon = canonByKey.get(s.linkTarget.toLowerCase());
       if (canon) {
         (canon.links ||= []).push(s);
+        // 带 project 归属的链接要留在视图里：本体在全局目录、项目标签长在链接上，
+        // 合并进本体后项目视图就看不见它了（真机出现过：项目列表少了一条链接 SKILL）
+        if (s.project) view.push(s);
         continue;
       }
     }

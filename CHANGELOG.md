@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.5] - 2026-10-12
+
+### 修复
+
+- **项目列表漏显链接安装的 SKILL**：指向全局本体的链接条目在生成展示列表时被合并进本体、项目标签随之丢失——base-water 里的 find-skills 等链接在项目视图中消失。现在带项目归属的链接独立出现在项目列表（卡片呈链接形态），全局视图的本体链接计数不受影响
+
+### English
+
+#### Fixed
+- **Project lists missed link-installed skills**: links pointing at a global canonical copy were merged into that copy and their project tag was lost — find-skills and friends vanished from the project view. Project-tagged links now appear in the project list as link cards; the canonical copy's link count on the global card is unaffected
+
 ## [1.0.4] - 2026-10-12
 
 ### 新增
