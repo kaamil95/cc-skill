@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.4] - 2026-10-12
+
+### 新增
+
+- **更新完成后弹「已更新到 vX」**：静默升级重启后，自动弹出这次更新的内容摘要——每条带「新增 / 修复 / 改进」徽章，可跳转对应版本的发布说明；数据打包在应用内，弹窗不联网。默认展开最近 3 版，跳版本多了也能一眼看完
+
+### English
+
+#### Added
+- **"Updated to vX" dialog after updates**: after a silent upgrade and relaunch, a summary of what changed pops up — each item badged as new / fix / improved, with a link to the matching release notes. Data ships inside the app, the dialog works offline. Last 3 versions are expanded by default
+
 ## [1.0.3] - 2026-10-12
 
 ### 变更
