@@ -2426,7 +2426,10 @@ async function onMachineAction(e) {
   if (!r.ok) return toast(r.error || t('操作失败'), 'err');
   if (act === 'adopt') {
     await refreshMachine();
-    toast(t('已认领这台机器 ✓'), 'ok');
+    const mg = r.merged;
+    if (mg && mg.moved > 0) toast(tf('已认领 ✓ 旧身份目录里的 {n} 份备份也并了进来', { n: mg.moved }), 'ok');
+    else if (mg && mg.removed) toast(t('已认领 ✓ 旧身份的空档案目录已清理'), 'ok');
+    else toast(t('已认领这台机器 ✓'), 'ok');
   } else {
     toast(t('已完成 ✓'), 'ok');
   }

@@ -1017,3 +1017,71 @@ test('认领与重置本机标识', async () => {
   assert.notEqual(reset.machineId, before);
   assert.equal(app.readConfig().machineId, reset.machineId);
 });
+
+test('认领合并：旧身份的空档案目录被清理，两条记录合成一条', async () => {
+  // 前面恢复类用例可能还原过备份里的 WebDAV 配置，先指回桩服务器
+  await app.invoke('sync:setConfig', { webdav: makeWebdavConfig(stub.url) });
+  // 先把本机身份切到云端没有目录的全新 id（前面的用例可能给当前身份建过目录，不可控）
+  const freshId = '0f0e0d0c-0b0a-4938-8271-000000000003';
+  const pre = await app.invoke('sync:adoptMachine', { machineId: freshId });
+  assert.equal(pre.ok, true, JSON.stringify(pre));
+
+  // 换安装形态后的典型残留：本机身份在云端只有一个 machine.json，没有任何备份
+  const shellDir = `shell-${freshId}`;
+  stub.collections.add(`/dav/${shellDir}`);
+  stub.writeJson(`/dav/${shellDir}/machine.json`, { machineId: freshId, machineName: 'Kaamils-V16-Pro', hostname: 'KAAMILS' });
+
+  const targetId = '0f0e0d0c-0b0a-4938-8271-000000000001';
+  const r = await app.invoke('sync:adoptMachine', { machineId: targetId });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(r.changed, true);
+  assert.deepEqual(r.merged, { dir: shellDir, moved: 0, removed: true });
+  assert.equal(app.readConfig().machineId, targetId);
+
+  // 云端不再有旧目录，档案列表里 self 只有一行
+  const list = await app.invoke('sync:machines');
+  assert.equal(list.ok, true);
+  assert.ok(!list.machines.some((m) => m.machineId === freshId && !m.self), '旧记录应已并成 self');
+  assert.equal(list.machines.filter((m) => m.self).length, 1);
+
+  // 还原身份，别影响后面的用例
+  const reset = await app.invoke('sync:resetMachine');
+  assert.equal(reset.ok, true);
+});
+
+test('认领合并：旧身份目录里的备份整体搬进新身份名下', async () => {
+  await app.invoke('sync:setConfig', { webdav: makeWebdavConfig(stub.url) });
+  const freshId = '0f0e0d0c-0b0a-4938-8271-000000000004';
+  const pre = await app.invoke('sync:adoptMachine', { machineId: freshId });
+  assert.equal(pre.ok, true, JSON.stringify(pre));
+
+  const oldDir = `laptop-${freshId}`;
+  stub.collections.add(`/dav/${oldDir}`);
+  stub.writeJson(`/dav/${oldDir}/machine.json`, { machineId: freshId, machineName: '旧笔记本', hostname: 'LAPTOP' });
+  const zips = ['cc-skill-backup-20260101-010101.zip', 'cc-skill-backup-20260102-010101.zip'];
+  for (const z of zips) {
+    stub.writeJson(`/dav/${oldDir}/${z}`, { fake: true });
+    stub.writeJson(`/dav/${oldDir}/${z}.json`, { name: z, entries: 1 });
+  }
+
+  const targetId = '0f0e0d0c-0b0a-4938-8271-000000000002';
+  const r = await app.invoke('sync:adoptMachine', { machineId: targetId });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(r.merged.moved, 2, '两份备份都应搬走');
+  assert.equal(r.merged.removed, true, '搬完旧目录应删除');
+
+  // 备份连侧车出现在本机（新身份）目录里
+  const list = await app.invoke('sync:machines');
+  assert.equal(list.ok, true);
+  const newDir = list.machines.find((m) => m.self).dir;
+  assert.ok(newDir && newDir !== oldDir, '新目录应不同于旧目录');
+  for (const z of zips) {
+    assert.ok(stub.files.has(`/dav/${newDir}/${z}`), `${z} 应在新目录`);
+    assert.ok(stub.files.has(`/dav/${newDir}/${z}.json`), `${z} 的侧车应在新目录`);
+    assert.ok(!stub.files.has(`/dav/${oldDir}/${z}`), `${z} 不应留在旧目录`);
+  }
+  assert.ok(!stub.collections.has(`/dav/${oldDir}`), '旧目录应已删除');
+
+  const reset = await app.invoke('sync:resetMachine');
+  assert.equal(reset.ok, true);
+});

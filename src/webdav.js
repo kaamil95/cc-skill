@@ -746,16 +746,102 @@ async function restoreInfo({ dir, name } = {}) {
  * 指纹重新生成，而硬件序列号最容易撞号），不如让用户明确断言「那份备份就是我」。
  * 认领之后 sameMachine 为真，项目与项目级 SKILL 一起回来；下一次备份会写进那个目录
  * （resolveMyDir 按标识找到它），云端那边也重新认上，是一次性的。
+ * 认领同时会合并云端残留：本机旧身份的目录要么是只有档案没有备份的空壳（换安装形态 /
+ * 重装后误建），直接清掉；要么带着真备份，整体挪进新身份名下再删旧目录——两条记录合成一条。
  */
-function adoptMachineId(id) {
+async function adoptMachineId(id) {
   const clean = String(id || '').trim();
   if (!MACHINE_ID_RE.test(clean)) return { ok: false, error: M('机器标识不合法', 'Invalid machine id') };
-  const changed = getConfig().machineId !== clean;
+  const old = getConfig().machineId || '';
+  const changed = old !== clean;
   if (changed) {
     getConfig().machineId = clean;
     saveConfig();
   }
-  return { ok: true, machineId: clean, changed };
+  let merged = null;
+  if (changed && old) {
+    try {
+      merged = await mergeMachineDir(old, clean);
+    } catch (_) {
+      /* 合并失败不挡认领：云端最多留一个孤儿档案，下次备份照常 */
+    }
+  }
+  return { ok: true, machineId: clean, changed, merged };
+}
+
+/**
+ * 把 oldId 的云端目录并进 newId 名下。
+ * 无备份包（空壳）→ 整目录删除；有备份包 → 逐份 MOVE 到新目录（同名跳过），全部挪成
+ * 才删旧目录——任何一份挪不动就整体放弃，旧目录原样保留，绝不丢数据。
+ * 返回 { dir, moved, removed }；云端没配置或找不到旧目录时返回 null。
+ */
+async function mergeMachineDir(oldId, newId) {
+  const cfg = webdavCfg();
+  if (!cfg.url || !oldId || oldId === newId) return null;
+  let dirs;
+  try {
+    dirs = (await listDir(cfg, davUrl(cfg, ''))).dirs;
+  } catch (_) {
+    return null;
+  }
+  // 目录名尾部的 UUID 优先（machine.json 坏了也认得出），档案内容兜底
+  let oldDir = '';
+  for (const d of dirs) {
+    if (!isSafeSegment(d)) continue;
+    if (machineIdFromDir(d) === oldId) {
+      oldDir = d;
+      break;
+    }
+    try {
+      const p = await readMachineJson(cfg, d);
+      if (p && p.machineId === oldId) {
+        oldDir = d;
+        break;
+      }
+    } catch (_) {
+      /* 读不出的目录与认领无关 */
+    }
+  }
+  if (!oldDir) return null;
+  const names = [...(await listDir(cfg, davUrl(cfg, oldDir))).files].filter((f) => BACKUP_NAME_RE.test(f)).sort();
+  if (!names.length) {
+    await davRequest(cfg, 'DELETE', davUrl(cfg, oldDir));
+    return { dir: oldDir, moved: 0, removed: true };
+  }
+  const newDir = machineDirName(newId, machineDisplayName());
+  try {
+    await davMkcolDeep(cfg, davUrl(cfg, newDir));
+  } catch (_) {
+    /* 建不了目录多半是已存在，MOVE 阶段见分晓 */
+  }
+  let moved = 0;
+  for (const n of names) {
+    try {
+      await davRequest(cfg, 'MOVE', davUrl(cfg, `${oldDir}/${n}`), {
+        headers: { Destination: davUrl(cfg, `${newDir}/${n}`), Overwrite: 'F' },
+      });
+    } catch (e) {
+      if (/HTTP 412/.test(String(e.message))) continue; // 新目录已有同名备份，跳过
+      return { dir: oldDir, moved, removed: false }; // 服务器不支持 MOVE 等：整体放弃，旧目录原样保留
+    }
+    moved++;
+  }
+  // 备份包都挪成了，侧车跟着搬（明细丢了恢复弹窗就得整包下载），然后删旧目录本体
+  for (const n of names) {
+    try {
+      await davRequest(cfg, 'MOVE', davUrl(cfg, `${oldDir}/${n}.json`), {
+        headers: { Destination: davUrl(cfg, `${newDir}/${n}.json`), Overwrite: 'F' },
+      });
+    } catch (_) {
+      /* 侧车可能本来就没写成功，搬不动就算了 */
+    }
+  }
+  try {
+    await davRequest(cfg, 'DELETE', davUrl(cfg, oldDir));
+  } catch (_) {
+    /* 删不干净就留着，里面已没有备份 */
+  }
+  return { dir: oldDir, moved, removed: true };
 }
 
 /** 重置本机标识：认领错了、或要把机器交出去时的退路 */
@@ -978,7 +1064,7 @@ async function restoreApply({ dir, name, agentIds, adoptMachine = false, allowEx
     // 必须在算 sameMachine 之前完成。旧版备份没有这一项 → 认领无从谈起，按「不认领」继续，
     // 不该因为用户勾了一下就把整次恢复拒掉。
     if (adoptMachine && manifest.machineId) {
-      const adopted = adoptMachineId(manifest.machineId);
+      const adopted = await adoptMachineId(manifest.machineId);
       if (!adopted.ok) return adopted;
       claimedId = adopted.changed;
     }

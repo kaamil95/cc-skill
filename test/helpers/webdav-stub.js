@@ -165,6 +165,29 @@ class WebdavStub {
       return;
     }
 
+    if (req.method === 'MOVE') {
+      // 认领合并用：Destination 是完整 URL，只认同主机路径；Overwrite 非 T 时目标已存在 → 412
+      let dest;
+      try {
+        dest = decodeURIComponent(new URL(req.headers.destination).pathname.split('?')[0]);
+      } catch (_) {
+        res.writeHead(400);
+        return res.end();
+      }
+      if (!this.files.has(key)) {
+        res.writeHead(404);
+        return res.end();
+      }
+      if (req.headers.overwrite !== 'T' && (this.files.has(dest) || this.collections.has(dest))) {
+        res.writeHead(412);
+        return res.end();
+      }
+      this.files.set(dest, this.files.get(key));
+      this.files.delete(key);
+      res.writeHead(201);
+      return res.end();
+    }
+
     if (req.method === 'DELETE') {
       let touched = this.files.delete(key);
       for (const k of [...this.files.keys()]) {

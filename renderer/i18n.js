@@ -665,6 +665,8 @@
     '操作失败': 'Action failed',
     '已完成 ✓': 'Done ✓',
     '已认领这台机器 ✓': 'Machine claimed ✓',
+    '已认领 ✓ 旧身份目录里的 {n} 份备份也并了进来': 'Claimed ✓ — {n} backup(s) from the old identity folder were merged in',
+    '已认领 ✓ 旧身份的空档案目录已清理': 'Claimed ✓ — the old identity\'s empty profile folder was cleaned up',
     '已认领这台机器，本机标识已更新 ✓': 'Machine claimed — this machine’s id has been updated ✓',
     '另一台电脑': 'another computer',
     '云端按机器分目录：每台备份过的机器一个子目录，备份包与它那一份信息都在里面。可以直接用别的机器的备份来恢复本机 —— 那只会还原全局 SKILL，项目级的只在恢复本机自己的备份时才回来。':
