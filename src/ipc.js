@@ -44,7 +44,7 @@ const {
 } = require('./skills');
 const { unpackZip } = require('./zip');
 const webdav = require('./webdav');
-const { checkUpdate, downloadUpdate } = require('./update');
+const { checkUpdate, downloadUpdate, installUpdate } = require('./update');
 
 function registerIpcHandlers({ getWindow, appDir, userData, applyProxy }) {
   const handle = (ch, fn) => {
@@ -246,6 +246,9 @@ function registerIpcHandlers({ getWindow, appDir, userData, applyProxy }) {
     }
   });
   handle('update:download', ({ url, version }) => downloadUpdate({ url, version }));
+  // 静默升级：等应用退出后 /S 重装（沿用原安装目录）并自动重启。spawn 的批处理是
+  // detached 的，app.quit() 立即返回也不会打断它
+  handle('update:install', ({ path: installerPath }) => installUpdate({ installerPath, appExe: app.getPath('exe'), isPackaged: app.isPackaged }));
 
   handle('app:paths', () => ({
     userData,

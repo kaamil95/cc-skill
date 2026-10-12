@@ -2890,9 +2890,15 @@ function syncUpdateButton() {
   if (state.hasUpdate) {
     $('#about-update-title').textContent = tf('检测到新版本：v{v}', { v: info.latestVersion });
     btn.classList.add('primary');
-    btn.textContent = tf('更新到 v{v}', { v: info.latestVersion });
-    btn.disabled = !info.asset;
-    if (!info.asset) btn.title = t('该版本没有适用于本平台的安装包');
+    if (state.updateReady) {
+      btn.textContent = t('立即安装');
+      btn.disabled = false;
+      btn.title = t('静默安装更新并自动重启');
+    } else {
+      btn.textContent = tf('更新到 v{v}', { v: info.latestVersion });
+      btn.disabled = !info.asset;
+      if (!info.asset) btn.title = t('该版本没有适用于本平台的安装包');
+    }
   } else {
     btn.classList.remove('primary');
     btn.textContent = t('检查更新');
@@ -2906,6 +2912,7 @@ let aboutChecking = false;
 async function runUpdateCheck({ silent = false } = {}) {
   if (aboutChecking) return;
   aboutChecking = true;
+  state.updateReady = null; // 新检测结果出来前，已就绪的安装包作废
   renderAbout();
   const btn = $('#btn-check-update');
   btn.disabled = true;
@@ -2926,9 +2933,31 @@ async function runUpdateCheck({ silent = false } = {}) {
 }
 
 async function doUpdate() {
+  const btn = $('#btn-check-update');
+  // 第二次点击：安装包已就绪，确认后退出 → 静默升级 → 自动重启（对齐 electron-updater / cc-switch 的体验）
+  if (state.updateReady) {
+    const info = state.updateReady;
+    const ok = await confirmModal({
+      title: t('立即安装'),
+      message: tf('将退出 CC Skill 并静默安装更新（v{v}），完成后自动重新启动。', { v: info.latestVersion }),
+      confirmLabel: t('退出并安装'),
+    });
+    if (!ok) return;
+    btn.disabled = true;
+    btn.textContent = t('正在退出并安装…');
+    const r = await api.invoke('update:install', { path: info.path });
+    if (!r.ok) {
+      btn.disabled = false;
+      syncUpdateButton();
+      toast(t('安装失败：') + (r.reason || ''), 'err');
+      return;
+    }
+    toast(t('CC Skill 正在退出，安装完成后会自动重新启动'), 'ok');
+    return; // 主进程随即退出，交给安装器
+  }
+  // 第一次点击：下载
   const info = state.updateInfo;
   if (!info || !info.asset) return;
-  const btn = $('#btn-check-update');
   btn.disabled = true;
   btn.textContent = t('下载中…');
   const r = await api.invoke('update:download', { url: info.asset.url, version: info.latestVersion });
@@ -2937,8 +2966,9 @@ async function doUpdate() {
     toast(t('下载失败：') + (r.error || r.reason || ''), 'err');
     return;
   }
-  toast(t('下载完成，已打开安装包 —— 安装后重新启动即可'), 'ok');
-  api.invoke('shell:openPath', { path: r.path });
+  state.updateReady = { ...info, path: r.path };
+  syncUpdateButton();
+  toast(t('更新包已就绪'), 'ok');
 }
 
 $('#btn-check-update').addEventListener('click', () => (state.hasUpdate ? doUpdate() : runUpdateCheck()));

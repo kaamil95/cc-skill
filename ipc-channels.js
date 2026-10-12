@@ -55,6 +55,7 @@ const IPC_CHANNELS = [
   'win:setBackground',
   'update:check',
   'update:download',
+  'update:install',
 ];
 
 module.exports = { IPC_CHANNELS, IPC_CHANNEL_SET: new Set(IPC_CHANNELS) };

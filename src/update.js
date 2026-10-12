@@ -1,9 +1,9 @@
-// 在线更新：从 github.com 网页端拿最新版本与安装包直链，下载后交给系统安装。
+// 在线更新：从 github.com 网页端拿最新版本与安装包直链，下载后在应用内静默升级并自动重启。
 // 刻意不走 api.github.com：它的匿名额度是每 IP 每小时 60 次，代理出口 IP 一共享就常年 403，
 // 而 github.com 网页端不按这套限流，也不需要任何 token。
-// 产物形态是 Windows 便携版 exe / macOS dmg，都不适合 electron-updater 的静默更新，
-// 所以做「检测 + 应用内下载 + 引导安装」这条稳妥路线，每一步都在用户眼皮底下发生。
 const path = require('path');
+const fs = require('fs');
+const { spawn } = require('child_process');
 const { httpGet, downloadToFile } = require('./net');
 const { tempDir } = require('./paths');
 
@@ -146,13 +146,41 @@ function isGitHubReleaseUrl(url) {
   }
 }
 
-/** 下载安装包到临时目录；返回本地路径，由渲染层 shell:openPath 引导用户安装 */
+/** 下载安装包到临时目录；返回本地路径，供「立即安装」静默升级 */
 async function downloadUpdate({ url, version }) {
   if (!isGitHubReleaseUrl(url)) return { ok: false, reason: 'invalid-url' };
   const ext = path.extname(new URL(url).pathname) || '.bin';
   const dest = path.join(tempDir(), `cc-skill-${String(version || 'update').replace(/[^\w.-]/g, '_')}${ext}`);
   const r = await downloadToFile(url, dest, { timeoutMs: UPDATE_TIMEOUT_MS, maxBytes: UPDATE_MAX_BYTES });
   return { ok: true, path: r.path, bytes: r.bytes };
+}
+
+/** 静默升级脚本：先等应用完全退出（exe 还被占用时安装器写不进去），再 /S 静默重装（沿用注册表里的安装目录），装完自动重启 */
+function buildUpdateBatch({ installerPath, appExe }) {
+  return ['@echo off', 'ping -n 3 127.0.0.1 >nul', `"${installerPath}" /S`, `start "" "${appExe}"`, ''].join('\r\n');
+}
+
+/**
+ * 退出应用 → 静默安装 → 自动重启。安装包只认本应用临时目录里刚下载的那个
+ * （这个入口等于「执行任意 exe」，路径必须收死）；开发模式跑的是 electron.exe，
+ * 静默升级打包版没有意义，直接拒绝。
+ */
+async function installUpdate({ installerPath, appExe, isPackaged }) {
+  if (process.platform !== 'win32') return { ok: false, reason: 'unsupported' };
+  if (!isPackaged) return { ok: false, reason: 'dev-mode' };
+  const safe = path.resolve(String(installerPath || ''));
+  if (
+    path.dirname(safe).toLowerCase() !== path.resolve(tempDir()).toLowerCase() ||
+    !/^cc-skill-[\w.-]+\.exe$/i.test(path.basename(safe)) ||
+    !fs.existsSync(safe)
+  ) {
+    return { ok: false, reason: 'invalid-path' };
+  }
+  const batchPath = path.join(tempDir(), 'cc-skill-update.cmd');
+  fs.writeFileSync(batchPath, buildUpdateBatch({ installerPath: safe, appExe: String(appExe || '') }), 'utf8');
+  const child = spawn('cmd.exe', ['/d', '/c', batchPath], { detached: true, stdio: 'ignore', windowsHide: true });
+  child.unref();
+  return { ok: true };
 }
 
 module.exports = {
@@ -166,5 +194,7 @@ module.exports = {
   parseTagFromReleasePage,
   checkUpdate,
   downloadUpdate,
+  buildUpdateBatch,
+  installUpdate,
   isGitHubReleaseUrl,
 };

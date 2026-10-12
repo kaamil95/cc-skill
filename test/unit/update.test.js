@@ -2,7 +2,17 @@
 const { test, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
 const { setFetchImpl } = require('../../src/net');
-const { parseVersion, compareVersions, pickAsset, parseAssets, checkUpdate, downloadUpdate, isGitHubReleaseUrl } = require('../../src/update');
+const {
+  parseVersion,
+  compareVersions,
+  pickAsset,
+  parseAssets,
+  checkUpdate,
+  downloadUpdate,
+  isGitHubReleaseUrl,
+  buildUpdateBatch,
+  installUpdate,
+} = require('../../src/update');
 
 afterEach(() => {
   // 还原成「没设置过」的默认实现，避免影响同文件后续用例
@@ -138,4 +148,18 @@ test('downloadUpdate：非 GitHub 直接拒绝，不下文件', async () => {
   const r = await downloadUpdate({ url: 'https://evil.example.com/x.exe', version: '1.2.0' });
   assert.equal(r.ok, false);
   assert.equal(r.reason, 'invalid-url');
+});
+
+test('buildUpdateBatch：等应用退出 → 静默重装 → 自动重启，三步齐全', () => {
+  const bat = buildUpdateBatch({ installerPath: String.raw`C:\Temp\cc-skill-1.0.2.exe`, appExe: String.raw`C:\Program Files\CC Skill\CC Skill.exe` });
+  const lines = bat.split('\r\n');
+  assert.match(lines[1], /ping -n 3/, '要先等应用退出');
+  assert.match(lines[2], /"C:\\Temp\\cc-skill-1\.0\.2\.exe" \/S/, '安装器必须带 /S 静默参数');
+  assert.match(lines[3], /start "" "C:\\Program Files\\CC Skill\\CC Skill\.exe"/, '装完要自动重启应用');
+});
+
+test('installUpdate：开发模式与非法路径直接拒绝，不执行任何东西', async () => {
+  assert.equal((await installUpdate({ installerPath: String.raw`C:\Temp\cc-skill-1.0.2.exe`, appExe: 'x', isPackaged: false })).reason, 'dev-mode');
+  assert.equal((await installUpdate({ installerPath: String.raw`C:\evil\tool.exe`, appExe: 'x', isPackaged: true })).reason, 'invalid-path');
+  assert.equal((await installUpdate({ installerPath: String.raw`C:\Windows\system32\cmd.exe`, appExe: 'x', isPackaged: true })).reason, 'invalid-path');
 });
