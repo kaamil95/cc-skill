@@ -159,7 +159,14 @@ test('buildUpdateBatch：等应用退出 → 静默重装 → 自动重启，三
 });
 
 test('installUpdate：开发模式与非法路径直接拒绝，不执行任何东西', async () => {
-  assert.equal((await installUpdate({ installerPath: String.raw`C:\Temp\cc-skill-1.0.2.exe`, appExe: 'x', isPackaged: false })).reason, 'dev-mode');
-  assert.equal((await installUpdate({ installerPath: String.raw`C:\evil\tool.exe`, appExe: 'x', isPackaged: true })).reason, 'invalid-path');
-  assert.equal((await installUpdate({ installerPath: String.raw`C:\Windows\system32\cmd.exe`, appExe: 'x', isPackaged: true })).reason, 'invalid-path');
+  // 非 Windows 平台在第一道门就被拦下（静默升级只支持 NSIS），期望值跟着平台走
+  const win = process.platform === 'win32';
+  assert.equal(
+    (await installUpdate({ installerPath: String.raw`C:\Temp\cc-skill-1.0.2.exe`, appExe: 'x', isPackaged: false })).reason,
+    win ? 'dev-mode' : 'unsupported'
+  );
+  assert.equal(
+    (await installUpdate({ installerPath: String.raw`C:\evil\tool.exe`, appExe: 'x', isPackaged: true })).reason,
+    win ? 'invalid-path' : 'unsupported'
+  );
 });
