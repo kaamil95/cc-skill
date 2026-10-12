@@ -7,6 +7,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### 修复
+
+- **机器认领会合并云端记录**：「设为我的机器标识」认领后，本机旧身份在云端留下的目录自动并入新身份名下——空档案目录直接清理，带备份的逐份搬进新目录再删旧目录，两条记录合成一条，不再冒出重复的机器
+
+## [1.0.1] - 2026-10-10
+
+### 新增
+
+- **应用内在线更新**：启动后静默检查一次，「关于」页可手动检查并一键下载安装包（下载只认 GitHub 发行附件域名）；检测走 `latest.json` 更新清单，绕开 GitHub API 匿名限流，无需任何 Token
+- **Windows 安装包改 NSIS**：不再是单个 portable exe，支持自选安装目录、桌面快捷方式，与应用内更新衔接更自然；数据目录按安装形态解析（便携跟 exe 走，安装版落系统标准位置）
+- **Agent 官方 Logo 智能识别**：Claude Code / Codex / Gemini / OpenCode / Copilot / OpenClaw / Qoder / ZCode 在侧栏、详情、总览中显示官方图标；自定义 Agent 的目录名或名字沾边也能认出
+- **详情弹窗支持编辑 SKILL 目录下任意文件**：方便改 SKILL 要读的配置（如 projects.json）
+- **JSON 文件语法高亮与实时检测**：正确时静默不打扰，出错时给出带行列号的中文提示并禁用保存
+- **自定义 Agent 弹窗提供常见 Agent 预设**：点选即填，仍可完全自定义名称与目录
+- **机器认领**：重装系统 / 换机器后，可在「云端机器档案」里把旧机器认领为本机，备份与配置直接接上
+
+### 变更
+
+- 「关于」页重排：横排标识区 + 更新提示卡 + Star 提示卡；检查更新不再随页签开关反复请求
+- 弹窗遮罩默认值调整为毛玻璃 1px / 遮暗 26%
+
+### 修复
+
+- 删除「单文件 SKILL」时误把整个技能目录送进回收站
+- 项目级 SKILL 的安装目标只展示该项目真实存在的约定目录，不再冒出从未配置的目录
+
+### English
+
+#### Added
+- **In-app updates**: a silent check once on startup, plus manual check & one-click installer download in "About" (downloads only trust GitHub release-attachment domains); detection reads the `latest.json` update manifest, bypassing GitHub API anonymous rate limits — no token needed
+- **NSIS installer on Windows**: replaces the single portable exe — choose the install directory, desktop shortcut, and a natural fit for in-app updates; the data directory resolves by install form (portable follows the exe, installed builds use the standard system location)
+- **Official agent logos with smart recognition**: Claude Code / Codex / Gemini / OpenCode / Copilot / OpenClaw / Qoder / ZCode show their official icons in the sidebar, detail dialogs and overview; custom agents are recognized when their directory or name matches
+- **Edit any file in a skill's directory** from the detail dialog — handy for configs the skill reads (e.g. projects.json)
+- **JSON syntax highlighting with live validation**: silent when valid, a Chinese error message with line/column when broken (saving is disabled until fixed)
+- **Presets for common agents** in the custom-agent dialog: click to fill, still fully editable
+- **Machine claiming**: after reinstalling or switching machines, claim an old cloud machine as this one and its backups and config reconnect
+
+#### Changed
+- The About tab is re-laid-out: horizontal identity header + update card + star card; the update check runs once per launch instead of on every tab open
+- Default dialog overlay: 1px blur / 26% dim
+
+#### Fixed
+- Deleting a single-file SKILL sent the whole skill folder to the Recycle Bin
+- Project-level skill targets now list only directories that actually exist in that project
+- Release manifests now URL-encode asset names the way GitHub does (spaces become dots), so update downloads resolve
+
 ## [1.0.0] - 2026-10-03
 
 ### 新增
