@@ -2992,6 +2992,86 @@ $('#btn-about-changelog').addEventListener('click', () => {
 // 启动后静默查一次新版本（对齐 cc-switch：查一次存状态，关于页只负责展示，不随页签开关反复请求）
 setTimeout(() => runUpdateCheck({ silent: true }).catch(() => {}), 1500);
 
+// ------------------------------ 更新完成弹窗 ---------------------------------
+// 数据是打包进应用的 CHANGELOG.md，主进程解析好 (seen, current] 区间；seen 记在
+// localStorage（本机状态，不进云同步，只往高记），首次安装没记录 → 不弹只记基线
+const WN_SEEN_KEY = 'cc-skill:whats-new-seen';
+const WN_TYPE_LABEL = { new: '新增', fix: '修复', improve: '改进' };
+const WN_EXPANDED = 3; // 默认展开最近 3 版，跳了很多版也不会撑满弹窗
+
+const mdLite = (s) =>
+  esc(s)
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/`([^`]+)`/g, '<code>$1</code>');
+
+let wnState = { entries: [], since: null, expanded: WN_EXPANDED };
+
+function wnRender() {
+  const { entries, since, expanded } = wnState;
+  const visible = entries.slice(0, expanded);
+  const html = [`<p class="wn-sub">${esc(tf('自 v{v} 以来的更新', { v: since }))}</p>`];
+  for (const e of visible) {
+    html.push('<section>');
+    html.push(`<div class="wn-ver"><h4>v${esc(e.version)}</h4><button class="wn-ver-link" data-wn-tag="${esc(e.version)}">${esc(t('详情'))} ↗</button></div>`);
+    html.push('<ul class="wn-list">');
+    for (const it of e.items) {
+      html.push(`<li><span class="wn-badge ${it.type}">${WN_TYPE_LABEL[it.type] || ''}</span><span>${mdLite(it.text)}</span></li>`);
+    }
+    html.push('</ul></section>');
+  }
+  if (entries.length > visible.length) {
+    html.push(`<button class="wn-more" id="btn-wn-more">› ${esc(tf('还有 {n} 个更早的版本', { n: entries.length - visible.length }))}</button>`);
+  }
+  $('#wn-body').innerHTML = html.join('');
+}
+
+function closeWhatsNew() {
+  closeModal('modal-whatsnew');
+  if (wnState.current) {
+    try {
+      localStorage.setItem(WN_SEEN_KEY, wnState.current);
+    } catch (_) {
+      /* 存不下就下次再弹一次，无伤大雅 */
+    }
+  }
+}
+
+(async () => {
+  try {
+    let seen = null;
+    try {
+      seen = localStorage.getItem(WN_SEEN_KEY);
+    } catch (_) {}
+    const r = await api.invoke('update:whatsnew', { seen });
+    if (!r || !r.entries || !r.entries.length) {
+      if (r && r.current) {
+        try {
+          localStorage.setItem(WN_SEEN_KEY, r.current);
+        } catch (_) {}
+      }
+      return;
+    }
+    wnState = { entries: r.entries, since: seen, expanded: WN_EXPANDED, current: r.current };
+    $('#wn-title').textContent = tf('已更新到 v{v}', { v: r.current });
+    wnRender();
+    $('#btn-wn-ok').addEventListener('click', closeWhatsNew);
+    $('#btn-wn-close').addEventListener('click', closeWhatsNew);
+    $('#btn-wn-full').addEventListener('click', () => api.invoke('shell:openUrl', { url: 'https://github.com/kaamil95/cc-skill/blob/main/CHANGELOG.md' }));
+    $('#wn-body').addEventListener('click', (e) => {
+      if (e.target.closest('#btn-wn-more')) {
+        wnState.expanded = wnState.entries.length;
+        wnRender();
+        return;
+      }
+      const link = e.target.closest('.wn-ver-link');
+      if (link) api.invoke('shell:openUrl', { url: 'https://github.com/kaamil95/cc-skill/releases/tag/v' + link.dataset.wnTag });
+    });
+    openModal('modal-whatsnew');
+  } catch (_) {
+    /* 弹窗数据拿不到就不弹，不影响启动 */
+  }
+})();
+
 $('#modal-settings').addEventListener('mousedown', (e) => {
   if (e.target === e.currentTarget) closeSettings(true);
 });

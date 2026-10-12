@@ -1384,6 +1384,27 @@ select.input {
 /* 指标回归参考站的素净形态：纯文字、右对齐，不做胶囊 */
 .mk-metric { flex: none; font-size: 12px; color: var(--text-3); font-variant-numeric: tabular-nums; }
 .mk-row-src { flex: none; font-size: 11.5px; color: var(--text-3); }
+/* ---------------- 更新完成弹窗（对齐 cc-switch 的 WhatsNewDialog） ---------------- */
+.wn-title { display: flex; align-items: center; gap: 8px; }
+.wn-spark { color: var(--accent); font-size: 15px; }
+.wn-body { max-height: 420px; overflow-y: auto; display: flex; flex-direction: column; gap: 18px; }
+.wn-sub { margin: 2px 0 0; font-size: 12.5px; color: var(--text-3); }
+.wn-ver { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.wn-ver h4 { margin: 0; font-size: 14px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.wn-ver-link { border: none; background: none; padding: 2px 4px; font-size: 11.5px; color: var(--text-3); cursor: pointer; }
+.wn-ver-link:hover { color: var(--text); text-decoration: underline; }
+.wn-list { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 7px; }
+.wn-list li { display: flex; align-items: flex-start; gap: 8px; font-size: 12.8px; line-height: 1.55; }
+.wn-badge {
+  flex: none; margin-top: 1px; padding: 1px 7px; border-radius: 99px;
+  font-size: 10.5px; line-height: 1.6; background: var(--fill); color: var(--text-2);
+}
+.wn-badge.new { background: var(--accent-soft); color: var(--accent); }
+.wn-badge.fix { background: color-mix(in srgb, var(--red) 12%, transparent); color: var(--red); }
+.wn-more { border: none; background: none; padding: 4px 0; font-size: 11.5px; color: var(--text-3); cursor: pointer; align-self: flex-start; }
+.wn-more:hover { color: var(--text); }
+.wn-foot { justify-content: space-between; }
+
 /* ---------------- 市场详情弹窗 ---------------- */
 .mkd-modal { width: 720px; }
 .mkd-body { display: flex; flex-direction: column; gap: 14px; min-height: 0; }

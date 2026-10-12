@@ -183,6 +183,43 @@ async function installUpdate({ installerPath, appExe, isPackaged }) {
   return { ok: true };
 }
 
+/**
+ * 「已更新到 vX」弹窗的数据源：打包进应用的 CHANGELOG.md 解析成结构化条目（新到旧）。
+ * 只认中文节（遇到 ### English 收工），小节标题映射成徽章类型，条目是 `- 内容` 行。
+ */
+function parseChangelogEntries(changelogText) {
+  const TYPE_BY_HEAD = { 新增: 'new', 修复: 'fix', 变更: 'improve' };
+  const entries = [];
+  let cur = null;
+  let type = '';
+  for (const raw of String(changelogText || '').split(/\r?\n/)) {
+    const line = raw.trim();
+    const head = /^## \[([^[\]]+)\]/.exec(line);
+    if (head) {
+      cur = { version: head[1].replace(/^v/i, ''), items: [] };
+      entries.push(cur);
+      type = '';
+      continue;
+    }
+    if (!cur) continue;
+    const sub = /^### (.+)$/.exec(line);
+    if (sub) {
+      // 英文节不进弹窗：清掉 type，条目就收不进来；后面的版本节照常解析
+      type = /^English/i.test(sub[1]) ? '' : TYPE_BY_HEAD[sub[1].trim()] || '';
+      continue;
+    }
+    if (!type || !/^-(?!-)/.test(line)) continue;
+    cur.items.push({ type, text: line.replace(/^-/, '').trim() });
+  }
+  return entries.filter((e) => e.items.length && parseVersion(e.version));
+}
+
+/** 启动弹窗该显示的版本：(seen, current] 里有内容的版本，新到旧；没有 seen（首次安装）不弹 */
+function entriesSince(entries, seen, current) {
+  if (!seen) return [];
+  return entries.filter((e) => compareVersions(e.version, seen) > 0 && compareVersions(e.version, current) <= 0);
+}
+
 module.exports = {
   REPO,
   LATEST_JSON_URL,
@@ -197,4 +234,6 @@ module.exports = {
   buildUpdateBatch,
   installUpdate,
   isGitHubReleaseUrl,
+  parseChangelogEntries,
+  entriesSince,
 };

@@ -12,6 +12,8 @@ const {
   isGitHubReleaseUrl,
   buildUpdateBatch,
   installUpdate,
+  parseChangelogEntries,
+  entriesSince,
 } = require('../../src/update');
 
 afterEach(() => {
@@ -169,4 +171,57 @@ test('installUpdate：开发模式与非法路径直接拒绝，不执行任何�
     (await installUpdate({ installerPath: String.raw`C:\evil\tool.exe`, appExe: 'x', isPackaged: true })).reason,
     win ? 'invalid-path' : 'unsupported'
   );
+});
+
+test('parseChangelogEntries：中文节解析成版本条目，英文节与空节不进结果', () => {
+  const md = [
+    '# Changelog',
+    '',
+    '## [1.0.3] - 2026-10-12',
+    '',
+    '### 变更',
+    '- **应用内更新改为静默升级**：点「立即安装」即可',
+    '',
+    '### English',
+    '',
+    '#### Changed',
+    '- **In-app updates are now silent**: click "Install now"',
+    '',
+    '## [1.0.2] - 2026-10-12',
+    '',
+    '### 修复',
+    '- **机器认领会合并云端记录**：两条记录合成一条',
+    '- **机器身份不再丢失**：落盘前强制补齐 machineId',
+    '',
+    '## [1.0.1] - 2026-10-10',
+    '',
+    '### 新增',
+    '- **应用内在线更新**：无需 Token',
+  ].join('\n');
+  const entries = parseChangelogEntries(md);
+  assert.deepEqual(
+    entries.map((e) => e.version),
+    ['1.0.3', '1.0.2', '1.0.1'],
+    '新到旧，1.0.3 的 English 节不截断后面的版本'
+  );
+  assert.equal(entries[0].items.length, 1);
+  assert.equal(entries[0].items[0].type, 'improve');
+  assert.equal(entries[1].items[0].type, 'fix');
+  assert.equal(entries[2].items[0].type, 'new');
+});
+
+test('entriesSince：只取 (seen, current] 区间；没有 seen 不弹', () => {
+  const entries = [
+    { version: '1.0.3', items: [{ type: 'improve', text: 'x' }] },
+    { version: '1.0.2', items: [{ type: 'fix', text: 'y' }] },
+    { version: '1.0.1', items: [{ type: 'new', text: 'z' }] },
+  ];
+  assert.deepEqual(entriesSince(entries, null, '1.0.3'), [], '首次安装不弹');
+  assert.deepEqual(
+    entriesSince(entries, '1.0.1', '1.0.3').map((e) => e.version),
+    ['1.0.3', '1.0.2'],
+    '(seen, current] 全弹'
+  );
+  assert.deepEqual(entriesSince(entries, '1.0.3', '1.0.3'), [], '刚看过就不弹');
+  assert.deepEqual(entriesSince(entries, '2.0.0', '1.0.3'), [], '降级不往回弹');
 });

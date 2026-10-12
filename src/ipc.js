@@ -44,7 +44,7 @@ const {
 } = require('./skills');
 const { unpackZip } = require('./zip');
 const webdav = require('./webdav');
-const { checkUpdate, downloadUpdate, installUpdate } = require('./update');
+const { checkUpdate, downloadUpdate, installUpdate, parseChangelogEntries, entriesSince } = require('./update');
 
 function registerIpcHandlers({ getWindow, appDir, userData, applyProxy }) {
   const handle = (ch, fn) => {
@@ -249,6 +249,18 @@ function registerIpcHandlers({ getWindow, appDir, userData, applyProxy }) {
   // 静默升级：等应用退出后 /S 重装（沿用原安装目录）并自动重启。spawn 的批处理是
   // detached 的，app.quit() 立即返回也不会打断它
   handle('update:install', ({ path: installerPath }) => installUpdate({ installerPath, appExe: app.getPath('exe'), isPackaged: app.isPackaged }));
+  // 「已更新到 vX」弹窗数据：读打包进应用的 CHANGELOG.md，返回 (seen, current] 区间的版本。
+  // seen 存在渲染层 localStorage（本机状态，不进云同步）；首次安装 seen 为空 → 不弹
+  handle('update:whatsnew', ({ seen } = {}) => {
+    let entries = [];
+    try {
+      entries = parseChangelogEntries(fs.readFileSync(path.join(app.getAppPath(), 'CHANGELOG.md'), 'utf8'));
+    } catch (_) {
+      /* CHANGELOG 读不到就不弹，不影响启动 */
+    }
+    const current = app.getVersion();
+    return { current, entries: seen ? entriesSince(entries, seen, current) : [] };
+  });
 
   handle('app:paths', () => ({
     userData,

@@ -48,7 +48,8 @@
       "preload.js",
       "ipc-channels.js",
       "src/**/*",
-      "renderer/**/*"
+      "renderer/**/*",
+      "CHANGELOG.md"
     ],
     "compression": "maximum",
     "electronLanguages": [

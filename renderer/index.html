@@ -509,6 +509,22 @@
     </div>
   </div>
 
+  <!-- 更新完成后的「已更新到 vX」弹窗：数据来自打包进应用的 CHANGELOG.md，不联网。
+       seen 版本号记在 localStorage（只往高记），(seen, current] 区间的版本全部展示 -->
+  <div class="modal-overlay hidden" id="modal-whatsnew">
+    <div class="modal" style="width:440px">
+      <div class="modal-head">
+        <div class="modal-title wn-title"><span class="wn-spark">✦</span><span id="wn-title"></span></div>
+        <button class="modal-close" id="btn-wn-close">×</button>
+      </div>
+      <div class="modal-body wn-body" id="wn-body"></div>
+      <div class="modal-foot wn-foot">
+        <button class="btn ghost" id="btn-wn-full" data-i18n="查看完整更新内容">查看完整更新内容</button>
+        <button class="btn primary" id="btn-wn-ok" data-i18n="知道了">知道了</button>
+      </div>
+    </div>
+  </div>
+
   <!-- 从 GitHub 安装：市场页「从 GitHub 安装」按钮弹出，仓库 / 子目录 / zip 链接都从这里进。
        Token 输入框不放这里（去「设置 → 网络」），只留一个直达设置页的快捷按钮 -->
   <div class="modal-overlay hidden" id="modal-mkgh">
