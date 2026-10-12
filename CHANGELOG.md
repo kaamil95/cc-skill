@@ -5,11 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.0.2] - 2026-10-12
 
 ### 修复
 
 - **机器认领会合并云端记录**：「设为我的机器标识」认领后，本机旧身份在云端留下的目录自动并入新身份名下——空档案目录直接清理，带备份的逐份搬进新目录再删旧目录，两条记录合成一条，不再冒出重复的机器
+- **机器身份不再丢失**：配置落盘前强制补齐 machineId——真机出现过配置文件只剩部分字段、本机被当成新机器、项目级恢复随之失效的现场
+- **搜索框聚焦时点标题栏空白可正常失焦**：顶栏拖动区此前会吞掉点击，搜索框的焦点收不走
+
+### English
+
+#### Fixed
+- **Machine claiming now merges cloud records**: after "make it my machine id", the folder left behind by the machine's old identity is merged into the claimed one — empty profile-only folders are cleaned up, folders with backups are moved file-by-file into the new directory before the old one is removed. Two records become one
+- **Machine identity can no longer be lost**: config writes always ensure machineId is present — on a real machine the config file once shrank to a few fields, the machine was treated as new, and project-level restores silently skipped
+- **Clicking the title bar while the search box is focused now blurs it**: the draggable top bar used to swallow those clicks
 
 ## [1.0.1] - 2026-10-10
 
