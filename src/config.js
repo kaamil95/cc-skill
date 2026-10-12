@@ -34,6 +34,9 @@ function configPath() {
 }
 
 function saveConfig() {
+  // 无论内存里的 config 被哪条链路改成了什么样，落盘时身份必须在——machineId 一旦丢，
+  // 下次备份就会被当成新机器，项目级恢复的门（sameMachine）也跟着失效
+  ensureMachineId();
   fs.mkdirSync(path.dirname(configPath()), { recursive: true });
   try {
     if (fs.existsSync(configPath())) {
