@@ -56,6 +56,7 @@ const IPC_CHANNELS = [
   'update:check',
   'update:download',
   'update:install',
+  'update:whatsnew',
 ];
 
 module.exports = { IPC_CHANNELS, IPC_CHANNEL_SET: new Set(IPC_CHANNELS) };
