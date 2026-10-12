@@ -3088,6 +3088,9 @@ $('#search').addEventListener('input', (e) => {
   state.search = e.target.value;
   renderGrid();
 });
+// 聚焦搜索框时顶栏临时让出拖动区，点空白才收得走焦点；失焦即恢复拖动
+$('#search').addEventListener('focus', () => $('#topbar').classList.add('search-focused'));
+$('#search').addEventListener('blur', () => $('#topbar').classList.remove('search-focused'));
 document.addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') {
     e.preventDefault();

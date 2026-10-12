@@ -307,6 +307,9 @@ svg.i { flex: none; display: block; }
   -webkit-app-region: drag;
 }
 #topbar button, #topbar input, .search, .win-controls { -webkit-app-region: no-drag; }
+/* 搜索框聚焦期间整条顶栏临时可点击：拖动区的点击会被系统拿去移动窗口、不进页面，
+   空白处点一下收不走搜索框的焦点。失焦后恢复拖动（见 app.js 的 focus/blur 监听） */
+#topbar.search-focused { -webkit-app-region: no-drag; }
 /* 窗口按钮收成竖直居中的小正方形：顶栏 60px 高，原先 44px 宽的按钮通栏拉满，
    悬停高亮会被拉成上下全是留白的长条，很难看 */
 .win-controls { display: flex; align-items: center; gap: 3px; margin-left: auto; padding-right: 8px; }
