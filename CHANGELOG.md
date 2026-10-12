@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.3] - 2026-10-12
+
+### 变更
+
+- **应用内更新改为静默升级**：下载完成后点「立即安装」，应用自动退出 → 静默重装（沿用原安装目录）→ 自动重启，全程不再弹安装向导，也不需要先手动关闭应用——对齐 electron-updater / CC Switch 这类成熟产品的更新体验
+
+### English
+
+#### Changed
+- **In-app updates are now silent**: after downloading, click "Install now" — the app exits, reinstalls silently over the existing location, and relaunches automatically. No installer wizard, no need to close the app first — matching electron-updater / CC Switch
+
 ## [1.0.2] - 2026-10-12
 
 ### 修复
