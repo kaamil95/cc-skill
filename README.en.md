@@ -43,6 +43,7 @@ Installing one SKILL for every agent means N divergent copies. CC Skill fixes th
 - 🔗 **Link management** — each SKILL detail lists its installed links; view / open / uninstall / add new
 - 🧹 **Merge duplicates** — finds the same SKILL copied into multiple directories and collapses them into "1 canonical copy + N links" (safe delete to Recycle Bin, retry & copy-fallback built in)
 - 🗂 **Project scopes** — register project folders (e.g. `your-repo/.claude/skills`) and move SKILLs between global and project scopes; project installs always use copies (git-safe)
+- 📁 **Virtual groups** — collect related SKILLs (e.g. a whole `wecomcli-*` family) into custom groups that collapse into a single folder row, so a crowded grid stays readable. **Bulk collect** gathers a name-prefix family in one click, and **group install** deploys the whole group to another agent. Global groups are shared across all agent views; project groups belong to their project only
 - 📊 **Dashboard** — counts, per-agent / per-project distribution, recent activity; missing skill directories are named right on their chips, and the dashboard's "N directories missing" count clicks through to the agent's view
 - 🛒 **Skill Market** — a first-class sidebar page with three sources: **built-in markets** (skills.sh, SkillsMP; the registry is extensible) searched by installs / stars, **GitHub** search and paste-a-link, and a **custom market** loading an index JSON. One two-step install for all of them: download and unpack → list every SKILL inside → preview `SKILL.md`, tick, install into any agent directory (with an explicit source-and-risk confirmation)
 - ☁️ **WebDAV backup & restore** — bring your own server (坚果云 / Nextcloud / Alist …), one-click snapshot of every physical SKILL, restore to the same directories on any machine
@@ -62,6 +63,30 @@ npm run dist           # portable exe (dist/CC Skill <version>.exe)
 Requirements: Windows 10+ (junction-based linking is NTFS) or macOS 12+, Node.js 22+ (for development and testing; the app itself runs on Electron's bundled Node).
 
 > Prebuilt portable exe is attached to each [Release](../../releases).
+
+### Installing on macOS (unsigned build)
+
+The macOS dmg is **not signed or notarized** (a personal project without an Apple Developer Program membership), so Gatekeeper blocks the first launch with "Apple could not verify CC Skill is free of malware". Use any of the following to allow it:
+
+**Option 1 — right-click to open (easiest)**
+
+1. Drag `CC Skill.app` into **Applications** (do **not** run it from inside the dmg);
+2. In Applications, **right-click** (or Control-click) CC Skill and choose **Open**;
+3. Click **Open** again in the dialog — macOS remembers this choice, and double-clicking works from then on.
+
+**Option 2 — allow via System Settings (if Option 1 fails)**
+
+1. Double-click the app once, then click **Done** on the blocking dialog;
+2. Open **System Settings → Privacy & Security**, scroll to the bottom, find the message about CC Skill being blocked, and click **Open Anyway**;
+3. Confirm with your Mac login password; double-clicking now launches the app.
+
+**Option 3 — strip the quarantine flag (developers)**
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/CC Skill.app"
+```
+
+> If macOS reports the app is "damaged", it is almost always because it was launched from inside the dmg or the download was incomplete: make sure the app is in Applications first, then use one of the options above — otherwise re-download the dmg.
 
 ## How it works
 
