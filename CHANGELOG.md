@@ -5,6 +5,52 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-10-18
+
+### 新增
+
+- **虚拟分组**：把同类 SKILL（如一整族 `wecomcli-*`）收进自定义分组，视图内折叠成一个「📁 分组」文件夹段，同类 SKILL 不再占满整屏。支持多归属、**一键收纳**（按名称前缀整族收齐，链接卡自动解析回本体）与**整组安装**到其他 Agent（单文件 / 项目目录自动降级为复制副本）。全局分组在所有 Agent 视图互通可见，项目分组只属于该项目
+- **未分组文件夹**：存在分组时，未分组卡片也收进「📁 未分组」文件夹（默认展开、可折叠），整页统一为「文件夹 → 成员」结构；一个分组都没有时保持平铺
+- 分组随 WebDAV 备份同步：成员用「目录（`~` 形式）+ 文件夹名」的可移植标识，换台机器目录变了还能按名称唯一回填；恢复别台机器的备份时自动清掉指向不存在项目的项目分组
+
+### 修复
+
+- 项目视图混入全局分组：分组折叠段未按当前视图作用域过滤
+- 项目视图（链接卡）取消勾选分组静默无效；本体不在扫描范围内的纯链接 SKILL 无法入组
+
+### 变更
+
+- 「一键收纳」限定当前选中的 Agent / 项目作用域，弹窗标注作用范围；入口移至顶栏
+- 分组管理入口改为视图内文件夹段头（重命名 / 删除 / 整组安装），去掉侧栏分组区
+- 分组名清理掉零宽与 bidi 控制符（防伪装）、分组/成员数量加上限（防畸形配置卡死界面）
+
+### 文档
+
+- 补充 macOS 未签名应用的安装放行步骤（右键打开 / 系统设置 / 移除 quarantine 标记）
+
+### English
+
+#### Added
+
+- **Virtual groups**: collect related skills (e.g. a whole `wecomcli-*` family) into custom groups that collapse into a single "📁 group" folder row. Multi-membership, **bulk collect** by name prefix (link cards resolve back to their canonical copy), and **group install** to another agent (single-file skills and project targets fall back to copies automatically). Global groups are shared across all agent views; project groups belong to their project only
+- **Ungrouped folder**: when any group is present, ungrouped cards move into an "📁 Ungrouped" folder (expanded by default, collapsible) so the page reads as a uniform folder → member structure; with no groups at all the grid stays flat
+- Groups ride WebDAV backups: members are stored as portable `{dir (~ form), folder}` identities, so a directory change on another machine still resolves by unique folder name; project groups pointing at projects that do not exist locally are cleaned up on restore
+
+#### Fixed
+
+- Project views leaked global groups (collapsed sections were not scoped to the current view)
+- Unchecking a group on a link card in a project view silently did nothing; link cards whose canonical copy is outside the scanned directories could not join a group
+
+#### Changed
+
+- Bulk collect is scoped to the selected agent / project and labels its scope; moved to the top bar
+- Group management now lives on the collapsed folder headers (rename / delete / group install); the sidebar group section is gone
+- Group names strip zero-width and bidi control characters (anti-spoofing); group and member counts are capped (malformed configs cannot freeze the UI)
+
+#### Docs
+
+- Added macOS install steps for the unsigned build (right-click open / System Settings / removing the quarantine flag)
+
 ## [1.0.5] - 2026-10-12
 
 ### 修复
