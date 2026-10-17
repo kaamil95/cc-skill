@@ -183,9 +183,9 @@ test('精确的链接匹配优先于按名称回填的启发式', () => {
 
 test('suggestPrefixes 同时看 folder：名称不含前缀但 folder 成族的也能检出', () => {
   const view = [
-    canon('C:\s', 'wecomcli-doc', { name: '企业微信文档' }),
-    canon('C:\s', 'wecomcli-mail', { name: '企业微信邮件' }),
-    canon('C:\s', 'wecomcli-cal', { name: '企业微信日程' }),
+    canon('C:/s', 'wecomcli-doc', { name: '企业微信文档' }),
+    canon('C:/s', 'wecomcli-mail', { name: '企业微信邮件' }),
+    canon('C:/s', 'wecomcli-cal', { name: '企业微信日程' }),
   ];
   assert.deepEqual(suggestPrefixes(view), [{ prefix: 'wecomcli-', count: 3 }]);
 });
