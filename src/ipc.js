@@ -65,10 +65,10 @@ function registerIpcHandlers({ getWindow, appDir, userData, applyProxy }) {
   // scan 的返回体里带上 WebDAV 配置（渲染层启动时要用），由这里拼装以保持 skills 模块纯净。
   // ok 必须显式给：handle 的兜底返回是 { ok:false }，渲染层据此区分「扫描成功但没内容」
   // 和「扫描整个失败了」——少了它，失败时渲染层会把 undefined 当数据用，界面停在空壳上。
-  handle('scan', () => ({ ok: true, ...scanAll(), webdav: webdav.webdavCfg() }));
+  handle('scan', () => ({ ok: true, ...scanAll(), webdav: webdav.webdavCfg(), collections: getConfig().collections || [] }));
 
   handle('config:get', () => ({ agents: getConfig().agents }));
-  handle('config:set', ({ agents, projects, ui, machineName }) => {
+  handle('config:set', ({ agents, projects, collections, ui, machineName }) => {
     // 各字段均可选：只传 ui 时（如「保存设置」）不会误伤 Agents / 项目
     const config = getConfig();
     if (agents !== undefined) {
@@ -79,20 +79,33 @@ function registerIpcHandlers({ getWindow, appDir, userData, applyProxy }) {
       if (!Array.isArray(projects)) return { ok: false, reason: 'invalid' };
       config.projects = projects.filter((p) => p && p.id && p.dir);
     }
+    // 分组整体替换（渲染层持有一份全量、改动后回写）；normalizeConfigInPlace 统一收敛
+    if (collections !== undefined) {
+      if (!Array.isArray(collections)) return { ok: false, reason: 'invalid' };
+      config.collections = collections;
+    }
     // 合并而非整体替换：只传 ui.lang 时不会把遮罩配置清掉
     if (ui) config.ui = normalizeUi({ ...config.ui, ...ui });
     // 机器名允许清空（清空 = 回落 hostname），所以只按「传没传」判断，不看真假值
     if (machineName !== undefined) config.machineName = normalizeMachineName(machineName);
     normalizeConfigInPlace();
     saveConfig();
-    return { ok: true, agents: config.agents, projects: config.projects, ui: config.ui, machineName: machineDisplayName() };
+    return {
+      ok: true,
+      agents: config.agents,
+      projects: config.projects,
+      collections: config.collections,
+      ui: config.ui,
+      machineName: machineDisplayName(),
+    };
   });
   handle('config:reset', () => {
     const config = getConfig();
     config.agents = JSON.parse(JSON.stringify(DEFAULT_AGENTS));
     config.projects = [];
+    config.collections = [];
     saveConfig();
-    return { ok: true, agents: config.agents, projects: config.projects };
+    return { ok: true, agents: config.agents, projects: config.projects, collections: config.collections };
   });
 
   // ------------------------------ 技能操作 -----------------------------------

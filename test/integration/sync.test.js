@@ -1085,3 +1085,88 @@ test('认领合并：旧身份目录里的备份整体搬进新身份名下', as
   const reset = await app.invoke('sync:resetMachine');
   assert.equal(reset.ok, true);
 });
+
+// ------------------------------ 分组随备份恢复 ------------------------------
+test('分组随备份恢复：本机备份全部还原；别台机器的备份丢掉项目组与绝对路径成员', async () => {
+  const pdir = tmpDir('cc-skill-proj-cols-');
+  extraDirs.push(pdir);
+  fs.mkdirSync(path.join(pdir, '.claude', 'skills'), { recursive: true });
+  await app.invoke('config:set', {
+    projects: [{ id: 'pc1', dir: pdir, name: 'pc1' }],
+    collections: [
+      { id: 'col-g', name: '全局组', scope: 'global', items: [{ dir: '~/.claude/skills', folder: 'g' }] },
+      { id: 'col-p', name: '项目组', scope: 'project:pc1', items: [{ dir: pdir + '/.claude/skills', folder: 'p' }] },
+    ],
+  });
+  assert.equal((await app.invoke('sync:backup')).ok, true);
+  // 本地清掉，恢复后从备份包里读回来
+  await app.invoke('config:set', { collections: [] });
+
+  const info = await app.invoke('sync:restoreInfo');
+  const r = await app.invoke('sync:restoreApply', { dir: info.dir, name: info.name });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(r.sameMachine, true, '（前提）本机自己的备份');
+  const cols = app
+    .readConfig()
+    .collections.map((c) => [c.id, c.scope])
+    .sort();
+  assert.deepEqual(
+    cols,
+    [
+      ['col-g', 'global'],
+      ['col-p', 'project:pc1'],
+    ].sort(),
+    '本机备份要把全局组与项目组都还原'
+  );
+
+  // 别台机器视角：项目配置不还原 → 项目组被清掉；绝对路径成员对别台机器无意义 → 只留 ~ 形式
+  const zipName = 'cc-skill-backup-20260208-080808.zip';
+  putZip(MY, zipName, {
+    manifest: {
+      app: 'CC Skill',
+      manifestVersion: 1,
+      created: new Date().toISOString(),
+      hostname: 'OLD-PC',
+      machineId: FOREIGN_ID,
+      settings: { agents: [] },
+      targets: [{ id: 't0', destDir: '~/.claude/skills', kind: 'global', projectId: null, agentIds: ['claude-code'], count: 1 }],
+      entries: [{ target: 't0', folder: 'g' }],
+    },
+    configJson: {
+      agents: [],
+      projects: [{ id: 'pc1', dir: pdir, name: 'pc1' }],
+      ui: {},
+      collections: [
+        {
+          id: 'col-g',
+          name: '全局组',
+          scope: 'global',
+          items: [
+            { dir: '~/.claude/skills', folder: 'g' },
+            { dir: pdir + '/.claude/skills', folder: 'x' },
+          ],
+        },
+        // 别台机器自己的项目分组：本项目列表里没有 p9，恢复后它只会是永久隐形的孤儿
+        { id: 'col-p', name: '项目组', scope: 'project:p9', items: [] },
+      ],
+    },
+    tree: { t0: { g: {} } },
+  });
+  const r2 = await app.invoke('sync:restoreApply', { dir: MY, name: zipName });
+  assert.equal(r2.ok, true, JSON.stringify(r2));
+  assert.equal(r2.sameMachine, false, '（前提）别台机器的备份');
+  const foreign = app.readConfig().collections;
+  assert.deepEqual(
+    foreign.map((c) => c.id),
+    ['col-g'],
+    '项目组指向的项目不在本机（跨机器不还原项目配置），应被清掉'
+  );
+  assert.deepEqual(
+    foreign[0].items.map((i) => i.folder),
+    ['g'],
+    '别台机器备份里的绝对路径成员应被丢弃，只保留 ~ 形式'
+  );
+
+  await app.invoke('config:set', { projects: [], collections: [] });
+  stub.remove(`/dav/${MY}/${zipName}`);
+});

@@ -603,6 +603,53 @@ body[data-platform='darwin'] #topbar { padding-left: 84px; }
   font-weight: 600;
   padding: 0.5px 6px 0.5px 5px;
 }
+/* 分组徽章：虚线边框强调「这只是个视图标签，不代表文件位置」 */
+.chip.grp-chip {
+  background: transparent;
+  border: 1px dashed color-mix(in srgb, var(--text-3) 45%, transparent);
+  color: var(--text-2);
+  padding: 0.5px 6px 0.5px 5px;
+}
+/* 分组弹窗：勾选行 + 新建行。行高紧凑，十几个分组也不至于把弹窗撑出屏 */
+.gp-list { display: flex; flex-direction: column; gap: 2px; max-height: 260px; overflow-y: auto; }
+.gp-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 8px; border-radius: 6px; cursor: pointer; font-size: 13px;
+}
+.gp-row:hover { background: var(--fill); }
+.gp-row .hint { margin-left: auto; }
+.gp-row input[type='checkbox'], .gp-row input[type='radio'] { accent-color: var(--accent); }
+.gp-new { display: flex; gap: 8px; margin-top: 10px; }
+.gp-new .input { flex: 1; }
+/* 网格里的分组折叠段：与 SKILL 卡片同一套视觉（面板底、圆角、悬浮阴影）。
+   整条是展开/收起的开关；右侧工具组 hover 才显形，避免一排按钮把段头变成工具栏 */
+.grp-card {
+  display: flex; align-items: center; gap: 10px;
+  margin: 14px 0 12px; padding: 13px 16px;
+  background: var(--panel); border-radius: var(--radius);
+  box-shadow: var(--shadow-card);
+  cursor: pointer; user-select: none;
+  transition: box-shadow 0.18s ease;
+}
+.grp-card:hover { box-shadow: var(--shadow-card-hover); }
+.grp-card .grp-icon { display: inline-flex; color: var(--accent); }
+.grp-card .grp-name { font-size: 14px; font-weight: 600; color: var(--text); }
+.grp-card .grp-count { font-size: 12.5px; color: var(--text-3); }
+.grp-card .grp-tools { margin-left: auto; display: flex; gap: 6px; opacity: 0; pointer-events: none; transition: opacity 0.15s; }
+/* hover 或键盘聚焦到段内按钮时显形：不用 visibility:hidden —— 那会把按钮移出 Tab 序列，
+   键盘用户永远够不到分组管理操作 */
+.grp-card:hover .grp-tools,
+.grp-card:focus-within .grp-tools { opacity: 1; pointer-events: auto; }
+.grp-card .grp-arrow { margin-left: 2px; color: var(--text-3); }
+/* 文件夹形态下的目录子标题：它是「未分组」文件夹内的层级，不是与文件夹头平级的段落 ——
+   收小、弱化、缩进，只保留「文件在哪个目录」的信息量 */
+.folder-body { padding: 2px 6px 0; }
+.folder-body .section-head { margin: 10px 2px 10px; }
+.folder-body .section-head h3 {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-3);
+}
 /* 路径：占位常驻、hover 才淡入。必须常驻——否则 hover 时卡片变高，会把同一行
    其他卡片一起顶下去（grid 行高取最高者），鼠标划过整片区域都在跳 */
 .card-path {

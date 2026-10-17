@@ -54,6 +54,7 @@ function loadConfig() {
     if (Array.isArray(raw.agents)) {
       config = raw;
       if (!Array.isArray(config.projects)) config.projects = [];
+      if (!Array.isArray(config.collections)) config.collections = [];
       config.ui = normalizeUi(config.ui);
       normalizeConfigInPlace();
       if (ensureMachineId()) saveConfig();
@@ -62,7 +63,7 @@ function loadConfig() {
   } catch (_) {
     /* 首次运行或损坏则重置 */
   }
-  config = { agents: JSON.parse(JSON.stringify(DEFAULT_AGENTS)), projects: [], ui: normalizeUi(null) };
+  config = { agents: JSON.parse(JSON.stringify(DEFAULT_AGENTS)), projects: [], collections: [], ui: normalizeUi(null) };
   normalizeConfigInPlace(); // 补齐 proxy / market 这类带默认值的字段
   ensureMachineId();
   saveConfig();
@@ -93,12 +94,21 @@ function ensureMachineId() {
 const MACHINE_NAME_MAX = 40;
 const MACHINE_ID_RE = /^[A-Za-z0-9._-]{1,64}$/;
 
-/** 机器名的归一化：去掉控制字符与换行（它要进 JSON 与界面），限长 40 */
+/** 机器名的归一化：去掉控制字符、零宽/bidi 格式字符与换行（它要进 JSON 与界面），限长 40 */
 function normalizeMachineName(raw) {
   if (typeof raw !== 'string') return '';
   // 逐字符判而不是写正则 [\x00-\x1f\x7f]：后者会被 eslint 的 no-control-regex 拦下
-  // （那条规则是对的，只是这里确实要判控制字符），逐字符判反而更直白
-  const cleaned = [...raw].map((ch) => (ch.codePointAt(0) < 32 || ch.codePointAt(0) === 127 ? ' ' : ch)).join('');
+  // （那条规则是对的，只是这里确实要判控制字符），逐字符判反而更直白。
+  // 零宽与 bidi 控制符（U+200B–200F / U+202A–202E / U+2066–2069）一并去掉：
+  // 它们不可见，能把分组名伪装成完全不同的字符串（删除确认框里尤其危险）
+  const cleaned = [...raw]
+    .map((ch) => {
+      const cp = ch.codePointAt(0);
+      if (cp < 32 || cp === 127) return ' ';
+      if ((cp >= 0x200b && cp <= 0x200f) || (cp >= 0x202a && cp <= 0x202e) || (cp >= 0x2066 && cp <= 0x2069)) return '';
+      return ch;
+    })
+    .join('');
   const collapsed = cleaned.replace(/\s+/g, ' ').trim();
   // 按码点截断：按 UTF-16 码元 slice 会把末尾的 emoji 切成半个代理对，落进配置就是乱码
   return [...collapsed].slice(0, MACHINE_NAME_MAX).join('');
@@ -143,6 +153,75 @@ function renameMachine(machineId, name) {
   }
   saveConfig();
   return { ok: true, name: clean || (self ? machineDisplayName() : ''), self };
+}
+
+// ------------------------------ 虚拟分组 -------------------------------------
+// 分组是纯视图概念：不碰磁盘，只是把若干 SKILL 收纳进一个收藏夹（企微相关、AI 工具…）。
+// 成员用 {dir, folder} 二元组标识而非绝对路径：dir 存 ~ 形式的未展开路径（与 agents[].dirs
+// 同源），换台机器 ~/ 各自解析到各自的家目录；目录对不上时还能按 folder 名回填
+// （见 renderer/collections.js 的两级匹配）。绝对路径是机器本地身份，跨机器恢复必失配。
+
+// 分组归属：global = 全局视图建的，所有 Agent 视图互通可见；
+// project:<id> = 项目视图建的，仅该项目视图可见。旧数据没有 scope 字段，一律按 global 迁移。
+// id 来自项目配置，字符集可能任意，这里只挡控制字符（会污染界面与日志）与超长
+function normalizeCollectionScope(raw) {
+  const s = String(raw || '');
+  if (s === 'global') return 'global';
+  // eslint-disable-next-line no-control-regex
+  if (/^project:[^\u0000-\u001f]{1,128}$/.test(s)) return s;
+  return 'global';
+}
+
+// 容量上限：备份包 / 导入文件是不可信输入，没有上限时一份畸形配置就能把界面卡死
+const COLLECTION_MAX = 200;
+const COLLECTION_ITEMS_MAX = 200;
+
+/** 分组结构收敛：脏条目整条丢弃，重复（同作用域内按 id 或名称）只留第一条，item 按目录+文件夹去重 */
+function normalizeCollections(raw) {
+  if (!Array.isArray(raw)) return [];
+  const out = [];
+  const seen = new Set();
+  for (const c of raw) {
+    if (out.length >= COLLECTION_MAX) break;
+    if (!c || typeof c.id !== 'string' || !MACHINE_ID_RE.test(c.id)) continue;
+    if (seen.has(c.id)) continue;
+    seen.add(c.id);
+    // 名字与机器名同一套清理：去控制字符、折叠空白、按码点截断（emoji 不能切半个代理对）
+    const name = normalizeMachineName(c.name);
+    if (!name) continue;
+    const scope = normalizeCollectionScope(c.scope);
+    // 同名只在自己作用域内算冲突：全局「Work」与项目「Work」可以共存
+    if (out.some((x) => x.scope === scope && x.name.toLowerCase() === name.toLowerCase())) continue;
+    // items 不是数组 = 结构损坏，整条丢；显式空数组是「刚建好还没收 SKILL」的合法状态
+    const rawItems = Array.isArray(c.items) ? c.items : null;
+    if (!rawItems) continue;
+    const items = [];
+    const seenItems = new Set();
+    for (const it of rawItems) {
+      if (items.length >= COLLECTION_ITEMS_MAX) break;
+      if (!it || typeof it.dir !== 'string' || typeof it.folder !== 'string') continue;
+      const dir = toTilde(it.dir.trim());
+      const folder = it.folder.trim();
+      // folder 必须是单个路径片段：带分隔符或 .. 的条目拼出来的路径会逃出技能目录
+      if (!dir || !folder || dir.length > 1024 || folder.length > 255) continue;
+      if (/[\\/]/.test(folder) || folder === '.' || folder === '..') continue;
+      // 去重键先收敛分隔符：C:\a\b 与 C:/a/b/ 是同一个目录（Windows 大小写也不敏感）
+      const k =
+        dir
+          .replace(/[\\/]+/g, '/')
+          .replace(/\/+$/, '')
+          .toLowerCase() +
+        '\u0000' +
+        folder.toLowerCase();
+      if (seenItems.has(k)) continue;
+      seenItems.add(k);
+      items.push({ dir, folder });
+    }
+    // 原本有成员、清洗后一个不剩 = 成员全损，分组已无信息，跟着丢，不留空壳噪声
+    if (rawItems.length && !items.length) continue;
+    out.push({ id: c.id, name, scope, items });
+  }
+  return out;
 }
 
 // 界面偏好：语言 + 主题 + 强调色 + 弹窗遮罩的毛玻璃强度。越界 / 缺失一律回落到默认值，
@@ -262,6 +341,8 @@ function normalizeConfigInPlace() {
     p.dir = toTilde(String(p.dir || '').trim());
     if (!p.name || /[\\/]/.test(p.name)) p.name = basenameOf(p.dir);
   }
+  // 分组同样走「手改 config.json 也不该把界面搞坏」的收敛；顺带把 dir 统一成 ~ 形式
+  config.collections = normalizeCollections(config.collections);
 }
 
 /**
@@ -297,6 +378,7 @@ function buildConfigPayload(includePassword) {
     config: {
       agents: config.agents,
       projects: config.projects,
+      collections: config.collections,
       webdav: w,
       ui: config.ui || { lang: 'auto' },
       // 机器名跟着走（换台机器不用重新起名）；machineId 不跟着走——那是身份，不是配置
@@ -360,6 +442,8 @@ function applyConfigPayload(payload, { includeWebdav = false } = {}) {
   const c = parsed.payload.config;
   config.agents = normalizeAgents(c.agents);
   config.projects = (Array.isArray(c.projects) ? c.projects : []).filter((p) => p && p.id && p.dir);
+  // 分组只在文件里带了才替换：旧版导出文件没有这个字段，别把本机已有的清掉
+  if (Array.isArray(c.collections)) config.collections = normalizeCollections(c.collections);
   if (c.ui) config.ui = normalizeUi({ ...config.ui, ...c.ui });
   let passwordCleared = false;
   if (includeWebdav && c.webdav) {
@@ -442,6 +526,8 @@ module.exports = {
   normalizeUi,
   normalizeMachineName,
   normalizeMachineNames,
+  normalizeCollections,
+  normalizeCollectionScope,
   machineDisplayName,
   renameMachine,
   MACHINE_ID_RE,

@@ -31,6 +31,9 @@ const state = {
   view: [],
   agents: [],
   projects: [],
+  // 虚拟分组（收藏夹）：成员是 {dir(~形式), folder} 可移植身份，与 skills 的对应关系
+  // 由 window.skillCollections 解析 —— 分组不碰磁盘，只是视图过滤
+  collections: [],
   webdav: {},
   missing: [],
   HOME: '',
@@ -125,6 +128,7 @@ const isProjectTarget = (v) => {
   );
 };
 const agentById = (id) => state.agents.find((a) => a.id === id);
+const { resolveCollection, membershipsFor, suggestPrefixes, inScopeFor, collectionsInScope, canonCardsInScope } = window.skillCollections;
 
 // ------------------------------ 日志 / Toast ---------------------------------
 function log(msg, type = '') {
@@ -302,6 +306,7 @@ async function scan() {
   state.skills = r.skills || [];
   state.agents = r.agents;
   state.projects = r.projects || [];
+  state.collections = r.collections || [];
   state.webdav = r.webdav || {};
   state.missing = r.missingDirs || [];
   state.projectSubs = r.projectSubs || [];
@@ -416,6 +421,326 @@ async function addProjectFlow() {
   setFilter('project:' + added.id);
 }
 
+// ------------------------------ 虚拟分组 ------------------------------------
+// 分组不占磁盘：当前视图内的折叠文件夹段 + 卡片徽章。成员解析全在 skillCollections
+//（有单测），这里只管交互与落盘。所有改动都走 config:set 整体回写 state.collections。
+
+// 把分组写回配置。next 是完整的新列表（成员改写、作用域校验都在调用方完成）
+async function saveCollections(next) {
+  const r = await api.invoke('config:set', { collections: next });
+  if (!r.ok) {
+    toast(t('保存失败'), 'err');
+    return false;
+  }
+  state.collections = r.collections || next;
+  renderSidebar();
+  renderGrid();
+  return true;
+}
+
+// 分组成员的规范化改写：以解析结果为准重排 items —— 失配条目就此剪掉（自愈），
+// 名称回填命中的条目落成本机真实目录，卡片在本体的 parentDir 上。
+// 例外：有已登记目录当前不存在（外置盘没挂载等）时保留失配条目 —— 不能因为盘暂时不在
+// 就把分组里的成员永久剪光，等盘回来它们还能解析上
+function collectionItemsRewrite(col, addCards = [], removeKeys = []) {
+  const { cards, dangling } = resolveCollection(state.view, col.items, expand);
+  const keys = new Set([...cards, ...addCards.map((s) => s.key)]);
+  for (const k of removeKeys) keys.delete(k);
+  const byKey = new Map(state.view.map((s) => [s.key, s]));
+  const kept = state.missing.length ? dangling : [];
+  return [...[...keys].map((k) => ({ dir: toTilde(byKey.get(k).parentDir), folder: byKey.get(k).folder })), ...kept];
+}
+
+// ------------------------------ 分组折叠段 ----------------------------------
+// 分组的展示形态是「当前视图里的一段可折叠网格」：同类 SKILL 折成一个 📁 段头，
+// 点开展开、点合收起，管理入口始终是全局 / 项目视图本身。展开状态记在 localStorage。
+
+// 折叠阈值：成员少于这个数不值得折（多一次点击才有到的信息），照常平铺 + 徽章
+const GRP_COLLAPSE_MIN = 3;
+const GRP_OPEN_KEY = 'cc-skill:grp-open';
+
+function grpOpenSet() {
+  try {
+    return new Set(JSON.parse(localStorage.getItem(GRP_OPEN_KEY) || '[]'));
+  } catch (_) {
+    return new Set();
+  }
+}
+
+function grpToggle(id) {
+  const s = grpOpenSet();
+  if (s.has(id)) s.delete(id);
+  else s.add(id);
+  try {
+    localStorage.setItem(GRP_OPEN_KEY, JSON.stringify([...s]));
+  } catch (_) {
+    /* 存储写不进去只影响记忆，不影响本次展开/收起 */
+  }
+}
+
+// 当前视图所属分组作用域：全局 Agent 视图 = 'global'，项目视图 = 'project:<id>'。
+// 分组按作用域隔离展示：全局组在任意 Agent 视图互通可见，项目组只在自己的项目里出现
+//（谓词与过滤逻辑在 renderer/collections.js，有单测）
+function currentCollectionScope() {
+  const f = String(state.filter);
+  return f.startsWith('project:') ? f : 'global';
+}
+
+// 折叠段头卡片。未分组（id='ungrouped'）是被动归拢出的文件夹，没有管理按钮
+function grpCardHTML(sec) {
+  const isUngrouped = sec.grp.id === 'ungrouped';
+  return `<div class="grp-card grp-head" data-grp="${esc(sec.grp.id)}">
+    <span class="grp-arrow">${sec.collapsed ? '▸' : '▾'}</span>
+    <span class="grp-icon">${FOLDER_SVG}</span>
+    <span class="grp-name">${esc(sec.title)}</span>
+    <span class="grp-count">${tf('{n} 个 SKILL', { n: sec.items.length })}</span>
+    ${
+      isUngrouped
+        ? ''
+        : `<span class="grp-tools">
+      <button class="btn sm act-grp-install" data-id="${esc(sec.grp.id)}" title="${esc(t('把整组 SKILL 安装到其他 Agent（复制副本或创建链接）'))}">${t('安装到…')}</button>
+      <button class="btn sm act-col-rename" data-id="${esc(sec.grp.id)}">${t('重命名')}</button>
+      <button class="btn sm danger act-col-del" data-id="${esc(sec.grp.id)}" data-name="${esc(sec.grp.name)}">${t('删除分组')}</button>
+    </span>`
+    }
+  </div>`;
+}
+
+// 重命名分组（唯一入口：折叠段头上的「重命名」）
+function openGroupNameModal(col) {
+  if (!col) return;
+  state.groupNameTarget = col;
+  $('#gn-title').textContent = t('重命名分组');
+  $('#gn-input').value = col.name;
+  $('#gn-hint').textContent = '';
+  openModal('modal-group-name');
+  setTimeout(() => $('#gn-input').focus(), 50);
+}
+
+$('#btn-group-name-go').addEventListener('click', async () => {
+  const name = $('#gn-input').value.trim();
+  const target = state.groupNameTarget;
+  if (!name || !target) return;
+  if (
+    state.collections.some((c) => c.id !== target.id && (c.scope || 'global') === (target.scope || 'global') && c.name.toLowerCase() === name.toLowerCase())
+  ) {
+    return toast(t('已存在同名分组'), 'err');
+  }
+  closeModal('modal-group-name');
+  if (await saveCollections(state.collections.map((c) => (c.id === target.id ? { ...c, name } : c)))) {
+    toast(tf('已重命名为 {name} ✓', { name }), 'ok');
+  }
+});
+
+// 删除分组：只删分组本身，SKILL 不受影响（成员本来就是视图引用，不落磁盘）
+async function deleteCollection(col) {
+  const okRemove = await confirmModal({
+    title: t('删除分组'),
+    message: tf('删除分组「{name}」？\n（只删除分组，里面的 SKILL 不会被删除）', { name: col.name }),
+    confirmLabel: t('删除'),
+    danger: false,
+  });
+  if (!okRemove) return;
+  if (await saveCollections(state.collections.filter((c) => c.id !== col.id))) {
+    toast(t('已删除分组 ✓'), 'ok');
+  }
+}
+
+$('#btn-group-bulk').addEventListener('click', openGroupBulkModal);
+
+// --------------------------- 分组批量安装 ------------------------------------
+// 折叠段头「安装到…」：整组 SKILL 按同一目标/方式批量装一遍。单文件建不了链接、
+// 目标在项目目录（Git 仓库）链接有误提交风险 —— 这两种情况逐个自动降级为复制副本
+let grpInstallCol = null;
+
+function openGrpInstallModal(col) {
+  grpInstallCol = col;
+  const { cards } = resolveCollection(state.view, col.items, expand);
+  const members = state.view.filter((s) => cards.has(s.key));
+  if (!members.length) return toast(t('该分组在当前视图没有成员'), 'err');
+  $('#gi-src').innerHTML = tf('将安装分组「{name}」中的 {n} 个 SKILL', { name: esc(col.name), n: members.length });
+  fillTargetPicker($('#gi-dir'), null);
+  openModal('modal-grp-install');
+}
+
+$('#btn-grp-install-go').addEventListener('click', async () => {
+  const col = grpInstallCol;
+  if (!col) return;
+  const { cards } = resolveCollection(state.view, col.items, expand);
+  const members = state.view.filter((s) => cards.has(s.key));
+  const destDir = pickerValue($('#gi-dir'));
+  const baseMode = $('input[name=gi-mode]:checked').value;
+  const onConflict = $('input[name=gi-conflict]:checked').value;
+  if (!destDir) return toast(t('（没有可用的目标目录）'), 'err');
+  $('#btn-grp-install-go').disabled = true;
+  let ok = 0;
+  let skipped = 0;
+  let failed = 0;
+  try {
+    for (const s of members) {
+      // copySkill 的冲突语义：overwrite / rename 之外一律返回 exists —— skip 就是这么实现的
+      let mode = baseMode;
+      if (mode === 'link' && (s.type !== 'folder' || isProjectTarget(destDir))) mode = 'copy';
+      let r = await api.invoke('skill:copy', { srcPath: s.absPath, type: s.type, destDir, folderName: s.folder, onConflict, mode });
+      // 目标在另一块磁盘上建不了链接：这一个改用复制副本重试
+      if (!r.ok && r.reason === 'cross-volume') {
+        r = await api.invoke('skill:copy', { srcPath: s.absPath, type: s.type, destDir, folderName: s.folder, onConflict, mode: 'copy' });
+      }
+      if (r.ok) ok++;
+      else if (r.reason === 'exists') skipped++;
+      else failed++;
+    }
+  } finally {
+    $('#btn-grp-install-go').disabled = false;
+  }
+  closeModal('modal-grp-install');
+  toast(tf('分组安装完成：成功 {ok} 个，跳过 {skip} 个，失败 {fail} 个', { ok, skip: skipped, fail: failed }), failed ? 'err' : 'ok');
+  scan();
+});
+
+// 「分组」弹窗：勾选当前 SKILL 归属哪些分组（多归属），或顺手新建一个分组并加入
+let groupPickCard = null;
+
+function openGroupPickModal(s) {
+  groupPickCard = s;
+  $('#gp-title').textContent = t('移入分组') + ' · ' + s.name;
+  // 只列当前作用域内的分组：全局组不出现在项目视图，项目组也不串到全局
+  const cols = collectionsInScope(state.collections, state.filter);
+  const member = membershipsFor(state.view, cols, expand).get(s.key) || [];
+  const memberIds = new Set(member.map((m) => m.id));
+  $('#gp-list').innerHTML = cols.length
+    ? cols
+        .map(
+          (c) => `<label class="gp-row"><input type="checkbox" data-id="${esc(c.id)}" ${memberIds.has(c.id) ? 'checked' : ''} />
+        <span>${esc(c.name)}</span><span class="hint">${resolveCollection(state.view, c.items, expand).cards.size}</span></label>`
+        )
+        .join('')
+    : `<div class="hint">${t('还没有分组，先在下面新建一个')}</div>`;
+  $('#gp-new-name').value = '';
+  $('#gp-hint').textContent = '';
+  openModal('modal-group-pick');
+}
+
+$('#gp-new-add').addEventListener('click', async () => {
+  const name = $('#gp-new-name').value.trim();
+  if (!name) return toast(t('请填写分组名称'), 'err');
+  if (collectionsInScope(state.collections, state.filter).some((c) => c.name.toLowerCase() === name.toLowerCase())) {
+    return toast(t('已存在同名分组'), 'err');
+  }
+  const col = {
+    id: 'col-' + Date.now(),
+    name,
+    scope: currentCollectionScope(),
+    items: groupPickCard ? [{ dir: toTilde(groupPickCard.parentDir), folder: groupPickCard.folder }] : [],
+  };
+  if (await saveCollections(state.collections.concat([col]))) {
+    toast(tf('已添加 {name} ✓', { name }), 'ok');
+    openGroupPickModal(groupPickCard); // 重画勾选列表，新分组应显示为已勾上
+  }
+});
+
+$('#btn-group-pick-save').addEventListener('click', async () => {
+  if (!groupPickCard) return;
+  const checked = new Set($$('#gp-list input[type="checkbox"]:checked').map((el) => el.dataset.id));
+  const cols = collectionsInScope(state.collections, state.filter);
+  const scopedIds = new Set(cols.map((c) => c.id));
+  const nowMember = membershipsFor(state.view, cols, expand).get(groupPickCard.key) || [];
+  const memberIds = new Set(nowMember.map((m) => m.id));
+  const next = [];
+  for (const c of state.collections) {
+    // 作用域外的分组原样保留：弹窗里没显示它们，不能借这次保存动它们的成员
+    if (!scopedIds.has(c.id)) {
+      next.push(c);
+      continue;
+    }
+    const was = memberIds.has(c.id);
+    const want = checked.has(c.id);
+    if (was === want) {
+      // 成员关系没动：保持原样，不触发该分组的失效自愈改写
+      next.push(c);
+      continue;
+    }
+    // 勾上 = 收进（改写顺带自愈）；取消勾选 = 从成员里摘掉这张卡。
+    // 摘除的 key 必须先归一成本体 key —— 项目视图里卡片是链接条目，而分组解析出的
+    // 成员集合记的是本体 key，直接用链接 key 去删是删不掉的（静默无效）
+    next.push({ ...c, items: collectionItemsRewrite(c, want ? [groupPickCard] : [], want ? [] : [pickKeyOf(groupPickCard)]) });
+  }
+  closeModal('modal-group-pick');
+  if (await saveCollections(next)) toast(t('已保存 ✓'), 'ok');
+});
+
+// 卡片 → 分组解析里的成员 key：链接卡归一到它的本体（本体不在扫描范围内时保持自身）
+function pickKeyOf(card) {
+  if (card.linked && card.linkTarget) {
+    const canon = state.view.find((x) => !x.linked && x.absPath.toLowerCase() === card.linkTarget.toLowerCase());
+    if (canon) return canon.key;
+  }
+  return card.key;
+}
+
+// 一键收纳：检测当前视图里的高频名称前缀（wecomcli- 这类家族命名），整族收进一个分组。
+// 作用域限定在当前选中的 Agent / 项目 —— 跨视图混收很容易把别的 Agent 的同前缀也卷进来
+function openGroupBulkModal() {
+  const inScope = inScopeFor(state.filter);
+  if (!inScope) return toast(t('请先在左侧选择一个 Agent 或项目，再使用一键收纳'), 'err');
+  const scoped = canonCardsInScope(state.view, state.filter);
+  const prefixes = suggestPrefixes(scoped);
+  if (!prefixes.length) {
+    toast(t('没有检测到成族的前缀（同前缀 ≥ 3 个 SKILL）'), 'err');
+    return;
+  }
+  // 记下当时的 filter：弹窗期间视图不会切，但按钮回调要按开弹窗时的作用域收
+  state.bulkScope = { filter: state.filter, name: $('#main-title').textContent, count: state.view.filter(inScope).length };
+  $('#gb-scope').innerHTML = tf('作用范围：{scope}（{n} 个 SKILL）', { scope: esc(state.bulkScope.name), n: state.bulkScope.count });
+  $('#gb-prefixes').innerHTML = prefixes
+    .map(
+      (p, i) => `<label class="gp-row"><input type="radio" name="gb-prefix" data-prefix="${esc(p.prefix)}" ${i === 0 ? 'checked' : ''} />
+      <span>${esc(p.prefix)}*</span><span class="hint">${tf('{n} 个 SKILL', { n: p.count })}</span></label>`
+    )
+    .join('');
+  // 目标列表只列当前作用域内的分组：全局组与项目组互不可见
+  const existing = collectionsInScope(state.collections, state.filter)
+    .map(
+      (c) => `<label class="gp-row"><input type="radio" name="gb-target" data-id="${esc(c.id)}" />
+      <span>${esc(c.name)}</span><span class="hint">${resolveCollection(state.view, c.items, expand).cards.size}</span></label>`
+    )
+    .join('');
+  $('#gb-targets').innerHTML = existing || `<div class="hint">${t('还没有分组，填个新名字即可')}</div>`;
+  $('#gb-new-name').value = '';
+  $('#gb-hint').textContent = '';
+  openModal('modal-group-bulk');
+}
+
+$('#btn-group-bulk-go').addEventListener('click', async () => {
+  const scope = state.bulkScope;
+  if (!scope) return;
+  const prefixEl = $('#gb-prefixes input:checked');
+  if (!prefixEl) return toast(t('没有可收纳的前缀'), 'err');
+  const prefix = prefixEl.dataset.prefix;
+  // 与建议阶段同一套解析：链接卡落回本体，跨视图只收当前作用域内的
+  const matches = canonCardsInScope(state.view, scope.filter).filter((s) => s.name.startsWith(prefix) || s.folder.startsWith(prefix));
+  if (!matches.length) return toast(t('没有匹配的 SKILL'), 'err');
+  const existingEl = $('#gb-targets input:checked');
+  const newName = $('#gb-new-name').value.trim();
+  if (existingEl) {
+    const col = state.collections.find((c) => c.id === existingEl.dataset.id);
+    const next = state.collections.map((c) => (c.id === col.id ? { ...c, items: collectionItemsRewrite(col, matches) } : c));
+    closeModal('modal-group-bulk');
+    if (await saveCollections(next)) toast(tf('已把 {n} 个 SKILL 收进「{name}」✓', { n: matches.length, name: col.name }), 'ok');
+  } else if (newName) {
+    if (collectionsInScope(state.collections, state.filter).some((c) => c.name.toLowerCase() === newName.toLowerCase())) {
+      return toast(t('已存在同名分组'), 'err');
+    }
+    const items = matches.map((s) => ({ dir: toTilde(s.parentDir), folder: s.folder }));
+    closeModal('modal-group-bulk');
+    if (await saveCollections(state.collections.concat([{ id: 'col-' + Date.now(), name: newName, scope: currentCollectionScope(), items }]))) {
+      toast(tf('已把 {n} 个 SKILL 收进「{name}」✓', { n: matches.length, name: newName }), 'ok');
+    }
+  } else {
+    toast(t('选择一个分组，或填写新分组名称'), 'err');
+  }
+});
+
 // ＋ 添加 Agent：命名后创建（目录为空，首次安装时自动生成默认目录）
 // 常见 Agent 预设：点选自动填入名称与默认目录，也支持完全自定义。
 // 只列有把握的官方 skills 目录约定；新条目记得与 agent-logos.js 的图标注册表对齐
@@ -515,9 +840,13 @@ function cardHTML(s) {
   const linkIds = linkOnlyAgentIds(s);
   const agents = s.allAgentIds.map(agentById).filter(Boolean);
   const shown = agents.slice(0, 3);
+  // 分组徽章排在最右：与 Agent 芯片（这台机器上的物理分布）语义不同，视觉上也用虚线边框区分
+  const groups = (state.groupMap && state.groupMap.get(s.key)) || [];
   const chips = (s.project ? [`<span class="chip proj-chip" title="${esc(t('项目 SKILL') + ' · ' + s.project.name)}">${esc(s.project.name)}</span>`] : [])
     .concat(shown.map((a) => agentChipHTML(a, linkIds.has(a.id))))
     .concat(agents.length > shown.length ? [`<span class="chip">+${agents.length - shown.length}</span>`] : [])
+    .concat(groups.slice(0, 2).map((g) => `<span class="chip grp-chip" title="${esc(t('虚拟分组') + ' · ' + g.name)}">📁 ${esc(g.name)}</span>`))
+    .concat(groups.length > 2 ? [`<span class="chip">+${groups.length - 2}</span>`] : [])
     .join('');
   const type = s.type === 'file' ? `<span class="card-type">${t('单文件')}</span>` : '';
   // 本体与链接刻意用两套相反的视觉：本体是实心徽章 + 卡片左侧实线（文件真在这儿），
@@ -546,6 +875,7 @@ function cardHTML(s) {
       <div class="card-chips">${chips}</div>
       <div class="card-actions">
         <button class="btn sm act-copy" title="${t('安装到其他 Agent（复制副本或创建链接）')}">${t('安装')}</button>
+        <button class="btn sm act-group" title="${t('收进 / 移出虚拟分组')}">${t('分组')}</button>
         <button class="btn sm danger act-del" title="${t('删除（移入回收站）')}">${t('删除')}</button>
       </div>
     </div>
@@ -560,6 +890,10 @@ function bindCards() {
     $('.act-copy', card).addEventListener('click', (e) => {
       e.stopPropagation();
       openCopyModal(s);
+    });
+    $('.act-group', card).addEventListener('click', (e) => {
+      e.stopPropagation();
+      openGroupPickModal(s);
     });
     $('.act-del', card).addEventListener('click', (e) => {
       e.stopPropagation();
@@ -579,8 +913,14 @@ function renderGrid() {
   const match = (s) => !q || (s.name + ' ' + (s.description || '') + ' ' + s.folder).toLowerCase().includes(q);
 
   const isProjectFilter = String(state.filter).startsWith('project:');
+  // 卡片的分组徽章整页只算一次：membershipsFor 要扫全部分组×全部卡片，逐卡调用就成 O(n²) 了。
+  // 只算当前作用域内的分组 —— 全局组不往项目视图里冒，项目组也不串到全局
+  state.groupMap = membershipsFor(state.view, collectionsInScope(state.collections, state.filter), expand);
   let sections;
   let cfgCard = '';
+  // 当前视图的范围谓词（inScopeFor，见 renderer/collections.js）：分组折叠段必须与基础段同用一道门，
+  // 否则全局 SKILL 会折进项目视图
+  const inScope = inScopeFor(state.filter);
   if (isProjectFilter) {
     const pid = state.filter.slice(8);
     const proj = state.projects.find((p) => p.id === pid);
@@ -637,8 +977,22 @@ function renderGrid() {
     }
   }
 
+  // 分组折叠段：在当前视图（含搜索过滤）里成员 ≥ 阈值的分组各成一段，排在未分组段之后。
+  // 多归属只进第一个认领它的分组（按配置顺序）——否则同一张卡会在两个折叠段里各出现一次
+  const claimed = new Set();
+  const grpSections = [];
+  const openSet = grpOpenSet(); // 折叠状态整页只读一次 localStorage
+  for (const col of collectionsInScope(state.collections, state.filter)) {
+    const items = state.view.filter((s) => inScope(s) && !claimed.has(s.key) && (state.groupMap.get(s.key) || []).some((g) => g.id === col.id) && match(s));
+    if (items.length < GRP_COLLAPSE_MIN) continue;
+    for (const s of items) claimed.add(s.key);
+    grpSections.push({ title: col.name, tag: '', dir: '', items, grp: col, collapsed: !openSet.has(col.id) });
+  }
+  // 已折叠收走的卡从平铺段里摘掉；成员被收光而空掉的段也顺手丢掉
+  sections = sections.map((sec) => ({ ...sec, items: sec.items.filter((s) => !claimed.has(s.key)) })).filter((sec) => sec.items.length);
+
   const grid = $('#grid');
-  const total = sections.reduce((n, sec) => n + sec.items.length, 0);
+  const total = sections.reduce((n, sec) => n + sec.items.length, 0) + grpSections.reduce((n, sec) => n + sec.items.length, 0);
   $('#main-hint').textContent = tf('共 {n} 个 SKILL', { n: total });
 
   // 空状态同样要带出路径 / 目录管理卡：新添加的项目或 Agent 还没有 SKILL 时，仍可移除项目、添加目录
@@ -649,13 +1003,38 @@ function renderGrid() {
   } else if (!total) {
     body = `<div class="empty"><div class="big">${SEARCH_BIG}</div>${q ? tf('没有匹配「{q}」的 SKILL', { q: esc(q) }) : t('当前筛选下暂无 SKILL')}</div>`;
   } else {
-    body = sections
-      .map(
-        (sec) => `
+    // 文件夹形态：只要当前视图里出现了分组折叠段，未分组卡片也收进一个「未分组」文件夹
+    //（默认展开、可折叠），整页是统一的「文件夹 → 成员」结构；一个分组都没命中时保持平铺，
+    // 别让零配置用户看到一座孤零零的空文件夹。
+    // 注意未分组与分组的折叠默认值相反：分组默认收起（open 集合里没有 = 收起），
+    // 未分组默认展开 —— 同一个 toggle 集合，对未分组取反着解释（在集合里 = 被收起过）
+    const folderMode = grpSections.length > 0;
+    const ungroupedCount = sections.reduce((n, sec) => n + sec.items.length, 0);
+    const ungroupedCollapsed = folderMode && ungroupedCount > 0 && openSet.has('ungrouped');
+    const renderSec = (sec) => {
+      const cards = `<div class="grid">${sec.items.map(cardHTML).join('')}</div>`;
+      // 分组折叠段：与 SKILL 卡片同一套视觉（面板底、圆角、悬浮阴影），整条是展开/收起的
+      // 开关，右侧工具组（整组安装 / 重命名 / 删除）hover 才显形
+      if (sec.grp) {
+        return `${grpCardHTML(sec)}${sec.collapsed ? '' : cards}`;
+      }
+      return `
     ${sec.title ? `<div class="section-head"><h3>${esc(sec.title)}</h3>${sec.tag ? `<span class="chip proj-chip">${esc(sec.tag)}</span>` : ''}<span class="hint">${tf('{n} 个', { n: sec.items.length })}</span></div>` : ''}
-    <div class="grid">${sec.items.map(cardHTML).join('')}</div>`
-      )
-      .join('');
+    ${cards}`;
+    };
+    // 文件夹形态下，目录子标题是「未分组」文件夹内的层级，包一层做弱化处理，
+    // 别和文件夹头平起平坐地打架
+    const ungroupedBody = ungroupedCollapsed
+      ? ''
+      : folderMode && sections.length
+        ? `<div class="folder-body">${sections.map(renderSec).join('')}</div>`
+        : sections.map(renderSec).join('');
+    body =
+      (folderMode && ungroupedCount
+        ? grpCardHTML({ grp: { id: 'ungrouped' }, title: t('未分组'), collapsed: ungroupedCollapsed, items: sections.flatMap((sec) => sec.items) })
+        : '') +
+      ungroupedBody +
+      grpSections.map(renderSec).join('');
   }
 
   grid.innerHTML = cfgCard + body;
@@ -664,6 +1043,13 @@ function renderGrid() {
 
   const gridEl = $('#grid');
   gridEl.onclick = async (e) => {
+    // 分组段头 = 折叠开关；段头右侧的按钮不触发折叠
+    const grpHead = e.target.closest('.grp-head');
+    if (grpHead && !e.target.closest('button')) {
+      grpToggle(grpHead.dataset.grp);
+      renderGrid();
+      return;
+    }
     const rmDir = e.target.closest('.cfg-dir-rm');
     if (rmDir) {
       await saveAgentDirs(
@@ -679,6 +1065,24 @@ function renderGrid() {
       const a = agentById(state.filter);
       if ((a.dirs || []).includes(d)) return toast(t('该目录已存在'), 'err');
       await saveAgentDirs(state.filter, [...(a.dirs || []), d]);
+      return;
+    }
+    const colRename = e.target.closest('.act-col-rename');
+    if (colRename) {
+      const col = state.collections.find((c) => c.id === colRename.dataset.id);
+      if (col) openGroupNameModal(col);
+      return;
+    }
+    const grpInstall = e.target.closest('.act-grp-install');
+    if (grpInstall) {
+      const col = state.collections.find((c) => c.id === grpInstall.dataset.id);
+      if (col) openGrpInstallModal(col);
+      return;
+    }
+    const colDel = e.target.closest('.act-col-del');
+    if (colDel) {
+      const col = state.collections.find((c) => c.id === colDel.dataset.id);
+      if (col) deleteCollection(col);
       return;
     }
     const delProj = e.target.closest('.act-proj-del');

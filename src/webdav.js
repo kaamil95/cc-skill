@@ -15,6 +15,7 @@ const {
   normalizeConfigInPlace,
   normalizeUi,
   mergeAgentDirs,
+  normalizeCollections,
   normalizeMachineName,
   normalizeMachineNames,
   machineDisplayName,
@@ -414,6 +415,7 @@ async function uploadSnapshot(items) {
           ui: getConfig().ui || { lang: 'auto' },
           agents: getConfig().agents,
           projects: getConfig().projects,
+          collections: getConfig().collections,
           webdav: packedWebdav,
           exportedAt: manifest.created,
         },
@@ -1165,6 +1167,18 @@ async function restoreApply({ dir, name, agentIds, adoptMachine = false, allowEx
         if (Array.isArray(c.projects)) {
           if (sameMachine) config.projects = c.projects.filter((p) => p && p.id && p.dir);
           else projectConfigSkipped = c.projects.filter((p) => p && p.id && p.dir).length;
+        }
+        // 分组不分 sameMachine 一并恢复：成员身份是 {dir(~形式), folder}，目录对不上还有
+        // folder 名唯一回填兜底（renderer/collections.js），这正是它敢用可移植标识的回报；
+        // 旧备份没这个字段就保留本机已有的。
+        // 项目分组带作用域（project:<id>）：恢复后本机没有该项目（跨机器恢复不还原项目配置）
+        // 的那些会永久不可见，留着只会在下一次备份里当孤儿传下去，直接清掉
+        if (Array.isArray(c.collections)) {
+          const known = new Set((config.projects || []).map((p) => 'project:' + p.id));
+          const cols = normalizeCollections(c.collections).filter((col) => col.scope === 'global' || known.has(col.scope));
+          // 外来备份的绝对路径目录对本机没有意义（且不该被一份外来配置文件塞进本机配置再随
+          // 下次备份扩散）：非本机备份只保留 ~ 形式的成员，其余在渲染层也解析不到、只是噪声
+          config.collections = sameMachine ? cols : cols.map((col) => ({ ...col, items: col.items.filter((it) => it.dir.startsWith('~')) }));
         }
         // 合并而非替换：旧备份的 config.json 里只有 lang，别把本地新加的界面偏好清掉
         if (c.ui) config.ui = normalizeUi({ ...config.ui, ...c.ui });

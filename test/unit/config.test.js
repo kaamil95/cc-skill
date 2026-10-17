@@ -14,6 +14,8 @@ const {
   redactProxyUrl,
   normalizeMachineName,
   normalizeMachineNames,
+  normalizeCollections,
+  normalizeCollectionScope,
   parseConfigPayload,
 } = require('../../src/config');
 
@@ -156,8 +158,9 @@ test('机器名去掉控制字符与换行，压掉连续空白，限长 40', ()
   // 截断必须按码点：按 UTF-16 码元 slice 会把末尾的 emoji 切成半个代理对，写进配置就是乱码
   assert.equal([...normalizeMachineName('🖥'.repeat(30))].length, 30, '30 个 emoji = 60 码元，不该被截成 40 码元');
   assert.equal([...normalizeMachineName('🖥'.repeat(50))].length, 40, '超长按码点截到 40');
-  // 零宽字符不是控制字符，不该被当空白吃掉
-  assert.equal(normalizeMachineName('a​b'), 'a​b');
+  // 零宽 / bidi 格式字符直接移除（不是换成空白）：它们不可见，能把名字伪装成
+  // 完全不同的字符串——删除确认框里写着「删除 A」实际删的是 B 就是这类字符干的
+  assert.equal(normalizeMachineName('a​b'), 'ab');
 });
 
 test('别名表丢掉非法 id 与空名字', () => {
@@ -202,4 +205,100 @@ test('parseConfigPayload 给出确认框要用的摘要', () => {
     machineName: '台式机',
     exportedAt: '2026-09-30T00:00:00.000Z',
   });
+});
+
+// ------------------------------ 虚拟分组归一化 ------------------------------
+test('normalizeCollections：形状收敛（脏条目整条丢、dir 统一 ~ 形式、item 去重）', () => {
+  // toTilde 只认真实家目录前缀，测试里的目录就用 homedir 拼出来
+  const os = require('os');
+  const homeSkills = require('path').join(os.homedir(), '.zcode', 'skills');
+  const out = normalizeCollections([
+    null,
+    {
+      id: 'ok',
+      name: ' 企微 ',
+      items: [
+        { dir: homeSkills, folder: 'doc' },
+        { dir: homeSkills.replaceAll('\\', '/') + '/', folder: 'doc' },
+      ],
+    },
+    { id: 'ok', name: '重复 id 丢弃', items: [] },
+    { name: '没有 id 的丢弃', items: [] },
+    { id: 'no-name', name: '', items: [] },
+    {
+      id: 'bad-folder',
+      name: 'X',
+      items: [
+        { dir: '~/a', folder: '../etc' },
+        { dir: '~/a', folder: 'a\\b' },
+      ],
+    },
+  ]);
+  assert.equal(out.length, 1);
+  assert.equal(out[0].id, 'ok');
+  assert.equal(out[0].name, '企微');
+  assert.deepEqual(out[0].items, [{ dir: '~/.zcode/skills', folder: 'doc' }]);
+});
+
+test('normalizeCollections：同名分组（大小写不敏感）只留第一条', () => {
+  const out = normalizeCollections([
+    { id: 'a', name: 'Work', items: [] },
+    { id: 'b', name: 'work', items: [] },
+  ]);
+  assert.equal(out.length, 1);
+  assert.equal(out[0].id, 'a');
+});
+
+test('normalizeCollections：空分组保留（刚建好还没收 SKILL 是合法状态）', () => {
+  const out = normalizeCollections([{ id: 'a', name: '空', items: [] }]);
+  assert.equal(out.length, 1);
+  assert.deepEqual(out[0].items, []);
+});
+
+test('normalizeCollections：非数组输入一律空表（旧版 config 缺字段不炸）', () => {
+  for (const input of [undefined, null, {}, 'x']) assert.deepEqual(normalizeCollections(input), []);
+});
+
+// ------------------------------ 分组作用域 ------------------------------
+test('normalizeCollections：旧数据没有 scope 一律迁移为 global', () => {
+  const out = normalizeCollections([{ id: 'a', name: '旧分组', items: [] }]);
+  assert.equal(out[0].scope, 'global');
+});
+
+test('normalizeCollections：合法 project scope 保留，非法值回落 global', () => {
+  const out = normalizeCollections([
+    { id: 'a', name: '项目组', scope: 'project:proj-1', items: [] },
+    { id: 'b', name: '坏作用域', scope: 'project:', items: [] },
+    { id: 'c', name: '乱写', scope: 42, items: [] },
+  ]);
+  assert.equal(out[0].scope, 'project:proj-1');
+  assert.equal(out[1].scope, 'global');
+  assert.equal(out[2].scope, 'global');
+});
+
+test('normalizeCollectionScope 直接分支', () => {
+  assert.equal(normalizeCollectionScope('global'), 'global');
+  assert.equal(normalizeCollectionScope('project:abc'), 'project:abc');
+  assert.equal(normalizeCollectionScope(''), 'global');
+  assert.equal(normalizeCollectionScope(null), 'global');
+});
+
+test('normalizeCollections：同名分组跨作用域允许共存，同作用域内仍去重', () => {
+  const out = normalizeCollections([
+    { id: 'a', name: 'Work', scope: 'global', items: [] },
+    { id: 'b', name: 'work', scope: 'project:p1', items: [] },
+    { id: 'c', name: 'WORK', scope: 'project:p1', items: [] },
+  ]);
+  assert.deepEqual(
+    out.map((c) => [c.id, c.scope]),
+    [
+      ['a', 'global'],
+      ['b', 'project:p1'],
+    ]
+  );
+});
+
+test('normalizeMachineName 去掉零宽与 bidi 控制符（分组名伪装防线）', () => {
+  assert.equal(normalizeMachineName('企\u200b微\u202e组'), '企微组');
+  assert.equal(normalizeMachineName('正常 名字'), '正常 名字');
 });

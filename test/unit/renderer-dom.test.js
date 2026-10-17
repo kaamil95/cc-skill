@@ -740,3 +740,13 @@ test('多目录 Agent 视图按目录分段，且不丢卡', () => {
   // 兜底断言：parentDir 不在任何已登记目录的条目单独成段，绝不能静默丢卡
   assert.match(appJs, /绝不能静默丢卡/, '必须有丢卡兜底注释标记');
 });
+
+test('分组作用域与成员解析走 collections 模块（有单测的那条路）', () => {
+  // 这些判定一旦在 app.js 里被重新手写一份，单测就覆盖不到了 —— 和 skillView 同一条规矩
+  for (const fn of ['resolveCollection', 'membershipsFor', 'inScopeFor', 'collectionsInScope', 'canonCardsInScope']) {
+    assert.match(appJs, new RegExp('\\b' + fn + '\\b'), 'app.js 应使用 skillCollections.' + fn);
+  }
+  const at = html.indexOf('src="collections.js"');
+  const appAt = html.indexOf('src="app.js"');
+  assert.ok(at > 0 && appAt > 0 && at < appAt, 'collections.js 必须先于 app.js 引入');
+});

@@ -9,6 +9,7 @@
   <!-- 主题要在首帧之前套上，否则会先闪一下默认配色；见 renderer/theme.js -->
   <script src="theme.js"></script>
   <script src="skill-view.js"></script>
+  <script src="collections.js"></script>
 </head>
 <body>
   <!-- 顶栏 -->
@@ -33,6 +34,10 @@
       <button id="btn-dups" class="btn ghost hidden" data-i18n-title="把同一 SKILL 的多份实体副本合并为：1 份唯一副本 + N 个链接">
         <svg class="i" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
         <span id="dups-label">合并重复</span>
+      </button>
+      <button id="btn-group-bulk" class="btn ghost" data-i18n-title="按名称前缀把一整族 SKILL 收进分组">
+        <svg class="i" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"/></svg>
+        <span data-i18n="一键收纳">一键收纳</span>
       </button>
       <button id="btn-import" class="btn ghost">
         <svg class="i" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
@@ -178,6 +183,37 @@
       <div class="modal-foot">
         <button class="btn" data-close="modal-copy" data-i18n="取消">取消</button>
         <button class="btn primary" id="btn-copy-go" data-i18n="开始复制">开始复制</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 分组批量安装：折叠段头「安装到…」——整组 SKILL 一次装到目标目录 -->
+  <div class="modal-overlay hidden" id="modal-grp-install">
+    <div class="modal">
+      <div class="modal-head">
+        <div class="modal-title" data-i18n="安装分组到其他 Agent">安装分组到其他 Agent</div>
+        <button class="modal-close" data-close="modal-grp-install">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-row" id="gi-src"></div>
+        <label class="form-label" data-i18n="目标目录（全局 Agent 目录或项目目录）">目标目录（全局 Agent 目录或项目目录）</label>
+        <div id="gi-dir" class="picker"></div>
+        <label class="form-label" data-i18n="安装方式">安装方式</label>
+        <div class="radio-row">
+          <label id="gi-link-label"><input type="radio" name="gi-mode" value="link" id="gi-mode-link" checked /> <span data-i18n="创建链接（单一副本）">创建链接（单一副本）</span></label>
+          <label><input type="radio" name="gi-mode" value="copy" id="gi-mode-copy" /> <span data-i18n="复制副本">复制副本</span></label>
+        </div>
+        <p class="hint" style="margin-top:6px" data-i18n="单文件 SKILL 无法创建链接，会自动改为复制副本；目标在项目目录时同样自动改为复制。">单文件 SKILL 无法创建链接，会自动改为复制副本；目标在项目目录时同样自动改为复制。</p>
+        <label class="form-label" data-i18n="目标已存在同名 SKILL 时">目标已存在同名 SKILL 时</label>
+        <div class="radio-row">
+          <label><input type="radio" name="gi-conflict" value="skip" checked /> <span data-i18n="跳过">跳过</span></label>
+          <label><input type="radio" name="gi-conflict" value="rename" /> <span data-i18n="自动重命名（如 xxx-2）">自动重命名（如 xxx-2）</span></label>
+          <label><input type="radio" name="gi-conflict" value="overwrite" /> <span data-i18n="覆盖">覆盖</span></label>
+        </div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn" data-close="modal-grp-install" data-i18n="取消">取消</button>
+        <button class="btn primary" id="btn-grp-install-go" data-i18n="开始安装">开始安装</button>
       </div>
     </div>
   </div>
@@ -637,6 +673,72 @@
       <div class="modal-foot">
         <button class="btn" data-close="modal-rename" data-i18n="取消">取消</button>
         <button class="btn primary" id="btn-rename-go" data-i18n="保存">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 分组：把当前 SKILL 勾进若干分组（多归属），或顺手新建一个 -->
+  <div class="modal-overlay hidden" id="modal-group-pick">
+    <div class="modal" style="width:420px">
+      <div class="modal-head">
+        <div class="modal-title" id="gp-title" data-i18n="移入分组">移入分组</div>
+        <button class="modal-close" data-close="modal-group-pick">×</button>
+      </div>
+      <div class="modal-body">
+        <div id="gp-list" class="gp-list"></div>
+        <div class="gp-new">
+          <input id="gp-new-name" class="input" maxlength="40" data-i18n-ph="新分组名称" placeholder="新分组名称" />
+          <button class="btn sm" id="gp-new-add" data-i18n="新建">新建</button>
+        </div>
+        <p class="hint" id="gp-hint"></p>
+      </div>
+      <div class="modal-foot">
+        <button class="btn" data-close="modal-group-pick" data-i18n="取消">取消</button>
+        <button class="btn primary" id="btn-group-pick-save" data-i18n="保存">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 分组命名：新建 / 重命名共用一个壳 -->
+  <div class="modal-overlay hidden" id="modal-group-name">
+    <div class="modal" style="width:400px">
+      <div class="modal-head">
+        <div class="modal-title" id="gn-title" data-i18n="重命名分组">重命名分组</div>
+        <button class="modal-close" data-close="modal-group-name">×</button>
+      </div>
+      <div class="modal-body">
+        <label class="form-label" for="gn-input" data-i18n="分组名称">分组名称</label>
+        <input id="gn-input" class="input" maxlength="40" />
+        <p class="hint" id="gn-hint"></p>
+      </div>
+      <div class="modal-foot">
+        <button class="btn" data-close="modal-group-name" data-i18n="取消">取消</button>
+        <button class="btn primary" id="btn-group-name-go" data-i18n="保存">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 一键收纳：检测高频名称前缀，整族收进一个分组 -->
+  <div class="modal-overlay hidden" id="modal-group-bulk">
+    <div class="modal" style="width:440px">
+      <div class="modal-head">
+        <div class="modal-title" data-i18n="一键收纳">一键收纳</div>
+        <button class="modal-close" data-close="modal-group-bulk">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-row" id="gb-scope"></div>
+        <label class="form-label" data-i18n="按名称前缀选择 SKILL 家族">按名称前缀选择 SKILL 家族</label>
+        <div id="gb-prefixes" class="gp-list"></div>
+        <label class="form-label" data-i18n="收进哪个分组">收进哪个分组</label>
+        <div id="gb-targets" class="gp-list"></div>
+        <div class="gp-new">
+          <input id="gb-new-name" class="input" maxlength="40" data-i18n-ph="新建分组并收进去" placeholder="新建分组并收进去" />
+        </div>
+        <p class="hint" id="gb-hint"></p>
+      </div>
+      <div class="modal-foot">
+        <button class="btn" data-close="modal-group-bulk" data-i18n="取消">取消</button>
+        <button class="btn primary" id="btn-group-bulk-go" data-i18n="收纳">收纳</button>
       </div>
     </div>
   </div>
